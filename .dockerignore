@@ -1,0 +1,17 @@
+*.zip
+*.log
+*.pdf
+*.xls
+*.xlsx
+*.json
+*.env
+
+**/.git
+__pycache__
+
+/venv
+/.idea
+/tmp
+/logs
+/.venv
+/.vscode
