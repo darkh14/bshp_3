@@ -38,20 +38,18 @@ def save_data(data: list[DataRow]) -> str:
 
 
 @app.post('/predict')
-def predict(data: list[DataRow]) -> list[dict]:
+def predict(data: list[DataRow]) -> list[DataRow]:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
     data_to_predict = pd.DataFrame([row.model_dump() for row in data])
-    data = processor.predict(data_to_predict)    
-    return data
+    return processor.predict(data_to_predict)
 
 
 @app.get('/get_info')
 def get_info() -> dict:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
-    result = processor.get_info()
-    return result
+    return processor.get_info
 
 
 @app.get('/drop_fitting')
@@ -83,10 +81,10 @@ def delete_all_data():
     db_connector.drop_all_db()
     return 'Datas has been deleted'
 
-@app.post('/metrics')
-def predict(data: list[DataRow]) -> list[DataRow]:
-    db_connector = MongoConnector("BSHP")
-    data_fit = pd.DataFrame(db_connector.get_lines('data'))
+# @app.post('/metrics')
+# def predict(data: list[DataRow]) -> list[DataRow]:
+#     db_connector = MongoConnector("BSHP")
+#     data_fit = pd.DataFrame(db_connector.get_lines('data'))
 
 
 def fit_background_new(data: DataFrame) -> bool:

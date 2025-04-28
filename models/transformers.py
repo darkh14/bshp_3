@@ -1,11 +1,7 @@
-from typing import Optional, Any
 import pandas as pd
 import re
-
-from sklearn.impute import SimpleImputer
 from db_connectors.connector import BaseConnector
-from pandas import DataFrame
-import datetime, random
+import random
 
 
 def prepare_to_fit(df: pd.DataFrame, target_name: str):
@@ -19,6 +15,7 @@ def prepare_to_fit(df: pd.DataFrame, target_name: str):
         x = df.drop(columns=[target_name], axis=1)
         y = df[target_name]
     return x, y
+
     
 def encode_objects_fit(df: pd.DataFrame):
     target_dict = {}
@@ -38,9 +35,11 @@ def encode_objects_fit(df: pd.DataFrame):
     print("ENCODE DATA---------DONE")
     return df, target_dict
     
+    
 def principal_period(s: str):
     i = (s + s).find(s, 1, -1)
     return s if i == -1 else s[:i]
+    
     
 def change_name(s: str):
     if s !='':
@@ -49,6 +48,7 @@ def change_name(s: str):
         s = ' '.join(result) 
     return s
     
+    
 def change_payment(s: str):
     if s !='':
         pattern = re.compile(r'\w+')
@@ -56,11 +56,10 @@ def change_payment(s: str):
         s = ' '.join(result) 
     return s
     
+    
 def tramsform_data(df: pd.DataFrame):
     df.drop_duplicates(inplace=True, ignore_index=True)
     df.drop(['date', 'base_name', 'document', 'unit_of_count', 'is_service'], axis=1, inplace=True)
-    # df['date'] = df['date'].apply(lambda x: datetime.datetime.strptime(x, '%Y-%m-%d'))
-    # df['date'] = df['date'].apply(lambda x: x.day)
     df.reverse = df.reverse.astype('str')
     df = df.fillna(0)
     df.loc[df['name_of_noomenclature'] == 0, 'name_of_noomenclature'] = ''
@@ -117,7 +116,7 @@ def transform_to_predict(db_connector: BaseConnector, df: pd.DataFrame):
             else:
                 new_key = random.choice(list(result.keys()))
                 df_transform.loc[row, col] = result[new_key]
-    print("TRANSFORM DATA--------DONE")
+    print("TRANSFORM TO PREDICT--------DONE")
     return df_transform
 
 

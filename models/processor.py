@@ -1,6 +1,5 @@
 from sklearn.ensemble import RandomForestClassifier
-from typing import Optional, Any
-import pickle
+from typing import Any
 import pandas as pd
 from datetime import datetime, timezone
 import shutil, os
@@ -31,7 +30,7 @@ class Processor:
         path = 'saved_models/'
         loaded_model = joblib.load(path + model_name)
         return loaded_model
-        
+                
     def fit(self, data: pd.DataFrame):
         
         if os.path.exists('saved_models'):
@@ -87,7 +86,6 @@ class Processor:
                     'fitting_end_date': None} 
         finally:
             return result
-
     
     def drop_fitting(self):
         for collection in self.db_connector._db.list_collection_names():
@@ -97,8 +95,7 @@ class Processor:
         self.db_connector.update_status('Model_info', 'fitting_start_date', None)
         self.db_connector.update_status('Model_info', 'fitting_end_date', None)
         shutil.rmtree("saved_models")
-        
-        
+              
     def metrics(self, x: pd.DataFrame, y: pd.DataFrame, model):
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.01, random_state=42)
         preds = model.predict(x_test)
@@ -106,36 +103,30 @@ class Processor:
         return accuracy
     
     def predict(self, data: pd.DataFrame):
-        result_list = []    
-        data_to_predict = transform_to_predict(self.db_connector, data)
-        for row in range(len(data_to_predict)):
-            result_dict = {} 
-            data_preds = data_to_predict[row:row+1]
-            print(data_preds)
-            result_dict['document'] = data_preds['document'].iloc[0]
+        data_result = data.copy()    
+        for row in range(len(data)):
+            data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
             model = self._load_model('article_cash_flow')
-            preds = model.predict(data_preds.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+            preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
             decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
-            result_dict['article_cash_flow'] = decode_preds[0]
-            data_preds['article_cash_flow'] = preds
-            print("PREDICT article_cash_flow--------DONE")
+            data_to_predict['article_cash_flow'] = preds[0]
+            data_result['article_cash_flow'][row:row+1] = decode_preds[0]
+            print("article_cash_flow--------DONE")
                 
-            mod_name = str(data_preds['article_cash_flow'].iloc[0])
-            print(mod_name)
-            model = self._load_model(mod_name)
-            preds = model.predict(data_preds.drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
-            data_preds['details_cash_flow'] = preds
+            mod_name = str(data_to_predict['article_cash_flow'].iloc[0])
+            model = self._load_model(mod_name[0])
+            preds = model.predict(data_to_predict.drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
+            data_to_predict['details_cash_flow'] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'details_cash_flow', preds)
-            result_dict['details_cash_flow'] = decode_preds[0]
-            print("PREDICT details_cash_flow--------DONE")
+            data_result['details_cash_flow'][row:row+1] = decode_preds[0]
+            print("details_cash_flow--------DONE")
                 
             model = self._load_model('year')
-            preds = model.predict(data_preds.drop(columns=['document', 'year'], axis=1))
+            preds = model.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
             decode_preds = decode_objects(self.db_connector, 'year', preds)
-            result_dict['year'] = decode_preds[0]
-            data_preds['year'] = preds
-            print("PREDICT year--------DONE")
-            result_list.append(result_dict)
+            data_to_predict['year'] = preds[0]
+            data_result['year'][row:row+1] = decode_preds[0]
+            print("year--------DONE")
         
-        print(result_list)
-        return result_list
+        result_json = data_result.to_dict(orient="records")
+        return result_json
