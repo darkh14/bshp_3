@@ -9,6 +9,8 @@ services:
       - 8063:80
     depends_on:
       - app
+    environment:
+      CLIENT_MAX_BODY_SIZE: 200M
     volumes:
       - ./.nginx/conf.d:/etc/nginx/conf.d
     networks:
