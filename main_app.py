@@ -81,17 +81,13 @@ def delete_all_data():
     db_connector.drop_all_db()
     return 'Datas has been deleted'
 
-# @app.post('/metrics')
-# def predict(data: list[DataRow]) -> list[DataRow]:
-#     db_connector = MongoConnector("BSHP")
-#     data_fit = pd.DataFrame(db_connector.get_lines('data'))
-
 
 def fit_background_new(data: DataFrame) -> bool:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
     processor.fit(data)
     return True
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8090, log_level="info")
