@@ -10,7 +10,8 @@ services:
     depends_on:
       - app
     environment:
-      CLIENT_MAX_BODY_SIZE: 200M
+      CLIENT_MAX_BODY_SIZE: 1000M
+      GLOBAL_MAX_BODY_SIZE: 1000M
     volumes:
       - ./.nginx/conf.d:/etc/nginx/conf.d
     networks:
