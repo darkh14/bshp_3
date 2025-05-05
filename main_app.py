@@ -3,7 +3,7 @@ import uvicorn
 from typing import Any
 import pandas as pd
 from pandas import DataFrame
-
+from fastapi import UploadFile, File
 from models.processor import Processor
 from db_connectors.connector import MongoConnector
 from api_types import DataRow, ModelInfo, ModelStatuses
@@ -34,9 +34,10 @@ def health() -> str:
 
 
 @app.post('/save_data')
-def save_data(data: list[DataRow]) -> str:
+def save_data(loaded_file: UploadFile = File(...)) -> str:
     db_connector = MongoConnector("BSHP")
-    data_save = [row.model_dump() for row in data]
+    processor = Processor(db_connector)
+    data_save = processor.unzip_file(loaded_file)
     db_connector.set_lines('data', data_save)
     db_connector.update_status('Model_info', 'Status', 'need_to_fit')
     return 'data saved'
