@@ -28,6 +28,11 @@ def health() -> str:
     return 'service is working'
 
 
+@app.get('/version')
+def health() -> str:
+    return VERSION
+
+
 @app.post('/save_data')
 def save_data(data: list[DataRow]) -> str:
     db_connector = MongoConnector("BSHP")
