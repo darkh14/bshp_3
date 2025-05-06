@@ -34,14 +34,16 @@ class Processor:
     def unzip_file(self, loaded_file):
         if not os.path.exists('unpacked_files'):
             os.makedirs('unpacked_files')
+        print('DONE DIR------')
         file_name = Path(loaded_file.filename).stem
+        print('DONE file_name------')
         with zipfile.ZipFile(loaded_file.file, 'r') as file:
             file.extractall('unpacked_files')
         with open(f'unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         os.remove(f'unpacked_files/{file_name}.json')
         return data
-              
+
     def fit(self, data: pd.DataFrame):        
         if os.path.exists('saved_models'):
             self.drop_fitting()

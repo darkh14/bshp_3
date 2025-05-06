@@ -1,13 +1,13 @@
 import fastapi
 import uvicorn
-from typing import Any
 import pandas as pd
 from pandas import DataFrame
 from fastapi import UploadFile, File
 from models.processor import Processor
 from db_connectors.connector import MongoConnector
-from api_types import DataRow, ModelInfo, ModelStatuses
+from api_types import DataRow
 from version import VERSION
+
 
 app = fastapi.FastAPI(title="BSHP App",  
                       description="Application for AI cash flow parameters predictions!",
@@ -37,6 +37,7 @@ def health() -> str:
 def save_data(loaded_file: UploadFile = File(...)) -> str:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
+    print('DONE------')
     data_save = processor.unzip_file(loaded_file)
     db_connector.set_lines('data', data_save)
     db_connector.update_status('Model_info', 'Status', 'need_to_fit')
@@ -55,7 +56,7 @@ def predict(data: list[DataRow]) -> list[DataRow]:
 def get_info() -> dict:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
-    return processor.get_info
+    return processor.get_info()
 
 
 @app.get('/drop_fitting')
