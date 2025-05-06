@@ -25,6 +25,11 @@ class BaseConnector():
         pass
 
     @abstractmethod
+    def update_status(self, collection_name: str, field: str, status_value: str,
+                      db_filter: Optional[dict[str, Any]] = None) -> bool:
+        pass
+
+    @abstractmethod
     def set_line(self, collection_name: str, value: dict[str, Any],
                   db_filter: Optional[dict[str, Any]] = None) -> bool:
         pass
@@ -44,7 +49,11 @@ class BaseConnector():
     
     @abstractmethod
     def drop_db(self) -> str:
-       pass
+        pass
+
+    @abstractmethod
+    def drop_all_db(self) -> str:
+        pass
 
 
 class MongoConnector(BaseConnector):
@@ -145,7 +154,8 @@ class MongoConnector(BaseConnector):
         collection = self._get_collection(collection_name)
 
         return collection.count_documents(c_filter)
-    
+
+    @_safe_db_action
     def drop_all_db(self) -> str:
         """Method to drop current database
         :return result of dropping"""
@@ -157,7 +167,8 @@ class MongoConnector(BaseConnector):
             self.delete_lines(collection_name)
 
         return result
-    
+
+    @_safe_db_action
     def drop_db(self, base_name) -> str:
         """Method to drop current database
         :return result of dropping"""
