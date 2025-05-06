@@ -35,10 +35,10 @@ def health() -> str:
 
 
 @app.post('/save_data')
-def save_data(loaded_file: UploadFile) -> str:
-    contents = loaded_file.file.read()
-    with open(loaded_file.filename, 'wb') as f:
-            f.write(contents)
+def save_data(loaded_file: UploadFile = File(...)) -> str:
+    # contents = loaded_file.file.read()
+    # with open(loaded_file.filename, 'wb') as f:
+    #         f.write(contents)
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
     data_save = processor.unzip_file(loaded_file)

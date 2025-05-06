@@ -13,6 +13,7 @@ from errors import ModuleBaseException
 from models.transformers import prepare_to_fit, encode_objects_fit, tramsform_data, transform_to_predict, decode_objects
 import joblib, json
 from pathlib import Path
+from zipfile import ZipFile
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -38,17 +39,21 @@ class Processor:
     def unzip_file(self, loaded_file):
         if not os.path.exists('unpacked_files'):
             os.makedirs('unpacked_files')
-        logger.info("Unpacked DIR DONE")
+        if not os.path.exists('loaded_files'):
+            os.makedirs('loaded_files')
         file_name = Path(loaded_file.filename).stem
-        print(file_name)
-        logger.info('DONE file_name------')
-        with zipfile.ZipFile(f'{file_name}.zip', 'r') as file:
-            file.extractall('unpacked_files')
+        print('file_name: ', file_name)
+        with open(f'loaded_files/{loaded_file.filename}', 'wb') as buffer:
+            shutil.copyfileobj(loaded_file.file, buffer)
+        logger.info('save file')
+        with ZipFile(f'loaded_files/{file_name}.zip', 'r') as zip:
+            zip.printdir()
+            zip.extractall('unpacked_files')
         logger.info('Unzip DONE------')
         with open(f'/unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         os.remove(f'unpacked_files/{file_name}.json')
-        os.remove(f'{file_name}.zip')
+        os.remove(f'loaded_files/{file_name}.zip')
         return data
 
     def fit(self, data: pd.DataFrame):        
