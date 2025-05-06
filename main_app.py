@@ -7,6 +7,7 @@ from models.processor import Processor
 from db_connectors.connector import MongoConnector
 from api_types import DataRow
 from version import VERSION
+from fastapi.responses import FileResponse
 
 
 app = fastapi.FastAPI(title="BSHP App",  
@@ -34,10 +35,12 @@ def health() -> str:
 
 
 @app.post('/save_data')
-def save_data(loaded_file: UploadFile = File(...)) -> str:
+def save_data(loaded_file: UploadFile) -> str:
+    contents = loaded_file.file.read()
+    with open(loaded_file.filename, 'wb') as f:
+            f.write(contents)
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
-    print('DONE------')
     data_save = processor.unzip_file(loaded_file)
     db_connector.set_lines('data', data_save)
     db_connector.update_status('Model_info', 'Status', 'need_to_fit')
