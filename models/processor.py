@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import shutil, os, zipfile
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+import logging
 
 from api_types import ModelStatuses
 from db_connectors.connector import BaseConnector
@@ -12,6 +13,9 @@ from errors import ModuleBaseException
 from models.transformers import prepare_to_fit, encode_objects_fit, tramsform_data, transform_to_predict, decode_objects
 import joblib, json
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
+logger = logging.getLogger(__name__)
 
 class Processor:
 
@@ -34,14 +38,17 @@ class Processor:
     def unzip_file(self, loaded_file):
         if not os.path.exists('unpacked_files'):
             os.makedirs('unpacked_files')
-        print('DONE DIR------')
+        logger.info("Unpacked DIR DONE")
         file_name = Path(loaded_file.filename).stem
-        print('DONE file_name------')
-        with zipfile.ZipFile(loaded_file.file, 'r') as file:
+        print(file_name)
+        logger.info('DONE file_name------')
+        with zipfile.ZipFile(f'{file_name}.zip', 'r') as file:
             file.extractall('unpacked_files')
-        with open(f'unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
+        logger.info('Unzip DONE------')
+        with open(f'/unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         os.remove(f'unpacked_files/{file_name}.json')
+        os.remove(f'{file_name}.zip')
         return data
 
     def fit(self, data: pd.DataFrame):        
@@ -59,7 +66,7 @@ class Processor:
         df_encode, target_dict = encode_objects_fit(df_transform)
         for key in target_dict.keys():
             self.db_connector.set_lines(key, [target_dict[key]])
-        print("SAVE DICTS---------DONE")
+        logger.info("SAVE DICTS---------DONE")
         for target in self.targets:
             if target == 'details_cash_flow':
                 names_art= list(df_encode['article_cash_flow'].unique())
@@ -68,22 +75,24 @@ class Processor:
                     x, y = prepare_to_fit(df_temp, 'details_cash_flow')
                     model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
                     model.fit(x, y)
-                    print(f"FIT MODEL {name}---------DONE")
+                    logger.info(f"FIT MODEL {name}---------DONE")
                     self._save_model(model, str(name))
-                    print(f"SAVE MODEL {name}---------DONE")
+                    logger.info(f"SAVE MODEL {name}---------DONE")
+                    accuracy = self.metrics(x, y, model)
+                    logger.info(f'Accuracy {target} ----- {accuracy}')
             else:
                 x, y = prepare_to_fit(df_encode, target)
                 model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
                 model.fit(x, y)
-                print(f"FIT MODEL {target}---------DONE")
+                logger.info(f"FIT MODEL {target}---------DONE")
                 self._save_model(model, target)
-                print(f"SAVE MODEL {target}---------DONE")
+                logger.info(f"SAVE MODEL {target}---------DONE")
                 accuracy = self.metrics(x, y, model)
-                print(f'Accuracy {target} ----- {accuracy}')
+                logger.info(f'Accuracy {target} ----- {accuracy}')
                 
         self.status = ModelStatuses.FIT
         self.db_connector.update_status('Model_info', 'Status', 'fit')
-        print("--------ALL DONE--------")
+        logger.info("--------ALL DONE--------")
         self.db_connector.update_status('Model_info', 'fitting_end_date', datetime.now(timezone.utc))
                 
     def get_info(self) -> dict[str, Any]:
@@ -109,7 +118,10 @@ class Processor:
         shutil.rmtree("saved_models")
               
     def metrics(self, x: pd.DataFrame, y: pd.DataFrame, model):
-        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.01, random_state=42)
+        if len(x) > 1:
+            x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.01, random_state=42)
+        else:
+            x_test, y_test = x, y
         preds = model.predict(x_test)
         accuracy = accuracy_score(y_test, preds)
         return accuracy
@@ -123,7 +135,7 @@ class Processor:
             decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
             data_to_predict['article_cash_flow'] = preds[0]
             data_result['article_cash_flow'][row:row+1] = decode_preds[0]
-            print("article_cash_flow--------DONE")
+            logger.info("article_cash_flow--------DONE")
                 
             mod_name = str(data_to_predict['article_cash_flow'].iloc[0])
             model = self._load_model(mod_name[0])
@@ -131,14 +143,14 @@ class Processor:
             data_to_predict['details_cash_flow'] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'details_cash_flow', preds)
             data_result['details_cash_flow'][row:row+1] = decode_preds[0]
-            print("details_cash_flow--------DONE")
+            logger.info("details_cash_flow--------DONE")
                 
             model = self._load_model('year')
             preds = model.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
             decode_preds = decode_objects(self.db_connector, 'year', preds)
             data_to_predict['year'] = preds[0]
             data_result['year'][row:row+1] = decode_preds[0]
-            print("year--------DONE")
+            logger.info("year--------DONE")
         
         result_json = data_result.to_dict(orient="records")
         return result_json
