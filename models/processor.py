@@ -37,12 +37,9 @@ class Processor:
         return loaded_model
     
     def unzip_file(self, loaded_file):
-        if not os.path.exists('unpacked_files'):
-            os.makedirs('unpacked_files')
-        if not os.path.exists('loaded_files'):
-            os.makedirs('loaded_files')
+        os.makedirs('unpacked_files', exist_ok=True)
+        os.makedirs('loaded_files', exist_ok=True)
         file_name = Path(loaded_file.filename).stem
-        print('file_name: ', file_name)
         with open(f'loaded_files/{loaded_file.filename}', 'wb') as buffer:
             shutil.copyfileobj(loaded_file.file, buffer)
         logger.info('save file')
@@ -50,8 +47,9 @@ class Processor:
             zip.printdir()
             zip.extractall('unpacked_files')
         logger.info('Unzip DONE------')
-        with open(f'/unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
+        with open(f'unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
+        logger.info('Get data DONE------')
         os.remove(f'unpacked_files/{file_name}.json')
         os.remove(f'loaded_files/{file_name}.zip')
         return data
