@@ -2,10 +2,16 @@ import pandas as pd
 import re
 from db_connectors.connector import BaseConnector
 import random
+import logging
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
+logger = logging.getLogger(__name__)
 
 def prepare_to_fit(df: pd.DataFrame, target_name: str):
-    if target_name == 'article_cash_flow':
+    if target_name == 'group':
+        x = df.drop(columns=[target_name, 'article_cash_flow', 'details_cash_flow', 'year'], axis=1)
+        y = df[target_name]
+    elif target_name == 'article_cash_flow':
         x = df.drop(columns=[target_name, 'details_cash_flow', 'year'], axis=1)
         y = df[target_name]
     elif target_name == 'details_cash_flow':
@@ -20,11 +26,11 @@ def prepare_to_fit(df: pd.DataFrame, target_name: str):
 def encode_objects_fit(df: pd.DataFrame):
     target_dict = {}
     df.reverse = df.reverse.astype('str')
-    df.is_service = df.is_service.astype('str')
+    df.group = df.group.astype('str')
     list_cols = ['article_cash_flow', 'details_cash_flow', 'year', 'moving_type', 'base_article','operation_type',  
                  'payment', 'reverse', 'type_of_customer', 'type_of_contract', 'account', 'sub_account', 'calculation_account', 'calculation_account_turnover', 
                  'calculation_account_total', 'account_kredit', 'account_debet', 'account_debet_turnover', 'account_debet_total', 'name_noom', 'type_noom', 
-                 'unit_noom','view_noom', 'group_noom']
+                 'unit_noom','view_noom', 'group_noom', 'group']
     for col in list_cols:
         details = df[col].unique()
         numbers = [i for i in range(len(details))]
@@ -32,9 +38,8 @@ def encode_objects_fit(df: pd.DataFrame):
         target_dict[col] = details_dict
         df[col] = df[col].apply(lambda x: details_dict[x])
         df[col] = df[col].astype('int')
-    print("ENCODE DATA---------DONE")
+    logger.info("ENCODE DATA---------DONE")
     return df, target_dict
-    
     
 def principal_period(s: str):
     i = (s + s).find(s, 1, -1)
@@ -59,7 +64,9 @@ def change_payment(s: str):
     
 def tramsform_data(df: pd.DataFrame):
     df.drop_duplicates(inplace=True, ignore_index=True)
-    df.drop(['date', 'base_name', 'document', 'unit_of_count', 'is_service'], axis=1, inplace=True)
+    df.drop(['date', 'document', 'base_name', 'unit_of_count', 'is_service'], axis=1, inplace=True)
+    if 'name_of_main_asset' in df.columns:
+        df.drop(['name_of_main_asset', 'type_of_main_asset', 'group_of_main_asset'], axis=1, inplace=True)
     df.reverse = df.reverse.astype('str')
     df = df.fillna(0)
     df.loc[df['name_of_noomenclature'] == 0, 'name_of_noomenclature'] = ''
@@ -91,12 +98,12 @@ def tramsform_data(df: pd.DataFrame):
     df['group_noom'] = df['group_of_noomenclature'].map(str) + df['group_of_noomenclature_sub'].map(str)
     df.drop(['group_of_noomenclature', 'group_of_noomenclature_sub'], axis=1, inplace=True)
     df['group_noom'] = df['group_noom'].apply(principal_period)
-    print("MERGE COLUMNS--------DONE")
+    logger.info("MERGE COLUMNS--------DONE")
         
     df['name_noom'] = df['name_noom'].apply(change_name)
     df.loc[df['payment'] == 0, 'payment'] = ''
     df['payment'] = df['payment'].apply(change_payment)
-    print("TRANSFORM DATA--------DONE")
+    logger.info("TRANSFORM DATA--------DONE")
         
     return df
     
@@ -116,7 +123,7 @@ def transform_to_predict(db_connector: BaseConnector, df: pd.DataFrame):
             else:
                 new_key = random.choice(list(result.keys()))
                 df_transform.loc[row, col] = result[new_key]
-    print("TRANSFORM TO PREDICT--------DONE")
+    logger.info("TRANSFORM TO PREDICT--------DONE")
     return df_transform
 
 
@@ -127,5 +134,5 @@ def decode_objects(db_connector: BaseConnector, target: str, predicts: list):
         for key in names_dict.keys():
             if predicts[i] == names_dict[key]:
                 result_list.append(key)
-    print("DECODE--------DONE")
+    logger.info("DECODE--------DONE")
     return result_list
