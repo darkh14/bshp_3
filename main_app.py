@@ -36,9 +36,6 @@ def health() -> str:
 
 @app.post('/save_data')
 def save_data(loaded_file: UploadFile = File(...)) -> str:
-    # contents = loaded_file.file.read()
-    # with open(loaded_file.filename, 'wb') as f:
-    #         f.write(contents)
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
     data_save = processor.unzip_file(loaded_file)
@@ -48,10 +45,11 @@ def save_data(loaded_file: UploadFile = File(...)) -> str:
 
 
 @app.post('/predict')
-def predict(data: list[DataRow]) -> list[DataRow]:
+def predict(loaded_file: UploadFile = File(...)) -> list[DataRow]:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
-    data_to_predict = pd.DataFrame([row.model_dump() for row in data])
+    data_save = processor.unzip_file(loaded_file)
+    data_to_predict = pd.DataFrame(data_save)
     return processor.predict(data_to_predict)
 
 

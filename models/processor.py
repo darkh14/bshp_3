@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class Processor:
 
     def __init__(self, db_connector: BaseConnector):
-        self.targets = ['article_cash_flow', 'details_cash_flow', 'year']
+        self.targets = ['group', 'article_cash_flow', 'details_cash_flow', 'year']
         self.db_connector: BaseConnector = db_connector
         self.status = ModelStatuses.NOTFIT
         
@@ -44,13 +44,12 @@ class Processor:
             shutil.copyfileobj(loaded_file.file, buffer)
         logger.info('save file')
         with ZipFile(f'loaded_files/{file_name}.zip', 'r') as zip:
-            zip.printdir()
             zip.extractall('unpacked_files')
         logger.info('Unzip DONE------')
         with open(f'unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         logger.info('Get data DONE------')
-        os.remove(f'unpacked_files/{file_name}.json')
+        # os.remove(f'unpacked_files/{file_name}.json')
         os.remove(f'loaded_files/{file_name}.zip')
         return data
 
@@ -64,14 +63,23 @@ class Processor:
         self.db_connector.update_status('Model_info', 'fitting_start_date', datetime.now(timezone.utc))
         self.status = ModelStatuses.INPROGRESS
         self.db_connector.update_status('Model_info', 'Status', 'in_progress')
-     
         df_transform = tramsform_data(data)
         df_encode, target_dict = encode_objects_fit(df_transform)
         for key in target_dict.keys():
             self.db_connector.set_lines(key, [target_dict[key]])
         logger.info("SAVE DICTS---------DONE")
         for target in self.targets:
-            if target == 'details_cash_flow':
+            if target == 'article_cash_flow':
+                names_group= list(df_encode['group'].unique())
+                for name in names_group:
+                    df_temp = df_encode[df_encode['group'] == names_group[name]]
+                    x, y = prepare_to_fit(df_temp, 'article_cash_flow')
+                    model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
+                    model.fit(x, y)
+                    logger.info(f"FIT MODEL {name}---------DONE")
+                    model_name = 'article' + str(name)
+                    self._save_model(model, model_name)
+            elif target == 'details_cash_flow':
                 names_art= list(df_encode['article_cash_flow'].unique())
                 for name in names_art:
                     df_temp = df_encode[df_encode['article_cash_flow'] == names_art[name]]
@@ -79,10 +87,8 @@ class Processor:
                     model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
                     model.fit(x, y)
                     logger.info(f"FIT MODEL {name}---------DONE")
-                    self._save_model(model, str(name))
-                    logger.info(f"SAVE MODEL {name}---------DONE")
-                    accuracy = self.metrics(x, y, model)
-                    logger.info(f'Accuracy {target} ----- {accuracy}')
+                    model_name = 'details' + str(name)
+                    self._save_model(model, model_name)
             else:
                 x, y = prepare_to_fit(df_encode, target)
                 model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
@@ -130,18 +136,30 @@ class Processor:
         return accuracy
     
     def predict(self, data: pd.DataFrame):
+        data.loc[data['price'] == '', 'price'] = 0
+        data.loc[data['group_of_noomenclature'] == 0, 'group_of_noomenclature'] = ''
+        data.loc[data['group_of_noomenclature_sub'] == 0, 'group_of_noomenclature_sub'] = ''
         data_result = data.copy()    
         for row in range(len(data)):
             data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
-            model = self._load_model('article_cash_flow')
+            model = self._load_model('group')
+            preds = model.predict(data_to_predict.drop(columns=['document', 'group', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+            decode_preds = decode_objects(self.db_connector, 'group', preds)
+            data_to_predict['group'] = preds[0]
+            data_result['group'][row:row+1] = decode_preds[0]
+            logger.info("group--------DONE")
+            
+            mod_name = 'article' + str(data_to_predict['group'].iloc[0])
+            model = self._load_model(mod_name)
+            # model = self._load_model(mod_name[0])
             preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
-            decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
             data_to_predict['article_cash_flow'] = preds[0]
+            decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
             data_result['article_cash_flow'][row:row+1] = decode_preds[0]
             logger.info("article_cash_flow--------DONE")
                 
-            mod_name = str(data_to_predict['article_cash_flow'].iloc[0])
-            model = self._load_model(mod_name[0])
+            mod_name = 'details' + str(data_to_predict['article_cash_flow'].iloc[0])
+            model = self._load_model(mod_name)
             preds = model.predict(data_to_predict.drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
             data_to_predict['details_cash_flow'] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'details_cash_flow', preds)
@@ -156,4 +174,5 @@ class Processor:
             logger.info("year--------DONE")
         
         result_json = data_result.to_dict(orient="records")
+        print(result_json)
         return result_json

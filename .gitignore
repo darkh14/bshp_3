@@ -1,5 +1,8 @@
 /.venv/*
 /.vscode/*
 .env
-
+/.idea/*
+/saved_models/*
+/loaded_files/*
+/unpacked_files/*
 __pycache__
