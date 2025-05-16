@@ -124,21 +124,19 @@ class Processor:
         self.db_connector.update_status('Model_info', 'Status', 'not_fit')
         self.db_connector.update_status('Model_info', 'fitting_start_date', None)
         self.db_connector.update_status('Model_info', 'fitting_end_date', None)
-        shutil.rmtree("saved_models")
+        try:
+            shutil.rmtree("saved_models")
+        except FileNotFoundError as ex:
+            print('Модель не была обучена')
               
     def metrics(self, x: pd.DataFrame, y: pd.DataFrame, model):
-        if len(x) > 1:
-            x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.01, random_state=42)
-        else:
-            x_test, y_test = x, y
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.01, random_state=42)
         preds = model.predict(x_test)
         accuracy = accuracy_score(y_test, preds)
         return accuracy
     
     def predict(self, data: pd.DataFrame):
         data.loc[data['price'] == '', 'price'] = 0
-        data.loc[data['group_of_noomenclature'] == 0, 'group_of_noomenclature'] = ''
-        data.loc[data['group_of_noomenclature_sub'] == 0, 'group_of_noomenclature_sub'] = ''
         data_result = data.copy()    
         for row in range(len(data)):
             data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
@@ -151,7 +149,6 @@ class Processor:
             
             mod_name = 'article' + str(data_to_predict['group'].iloc[0])
             model = self._load_model(mod_name)
-            # model = self._load_model(mod_name[0])
             preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
             data_to_predict['article_cash_flow'] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)

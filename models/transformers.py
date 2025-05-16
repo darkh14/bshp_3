@@ -69,32 +69,22 @@ def tramsform_data(df: pd.DataFrame):
         df.drop(['name_of_main_asset', 'type_of_main_asset', 'group_of_main_asset'], axis=1, inplace=True)
     df.reverse = df.reverse.astype('str')
     df = df.fillna(0)
-    df.loc[df['name_of_noomenclature'] == 0, 'name_of_noomenclature'] = ''
-    df.loc[df['name_of_noomenclature_sub'] == 0, 'name_of_noomenclature_sub'] = ''
     df['name_noom'] = df['name_of_noomenclature'].map(str) + df['name_of_noomenclature_sub'].map(str) 
     df.drop(['name_of_noomenclature', 'name_of_noomenclature_sub'], axis=1, inplace=True)
     df['name_noom'] = df['name_noom'].apply(principal_period)
 
-    df.loc[df['type_of_noomenclature'] == 0, 'type_of_noomenclature'] = ''
-    df.loc[df['type_of_noomenclature_sub'] == 0, 'type_of_noomenclature_sub'] = ''
     df['type_noom'] = df['type_of_noomenclature'].map(str) + df['type_of_noomenclature_sub'].map(str)
     df.drop(['type_of_noomenclature', 'type_of_noomenclature_sub'], axis=1, inplace=True)
     df['type_noom'] = df['type_noom'].apply(principal_period)
 
-    df.loc[df['noomenclature_unit'] == 0, 'noomenclature_unit'] = ''
-    df.loc[df['noomenclature_unit_sub'] == 0, 'noomenclature_unit_sub'] = ''
     df['unit_noom'] = df['noomenclature_unit'].map(str) + df['noomenclature_unit_sub'].map(str)
     df.drop(['noomenclature_unit', 'noomenclature_unit_sub'], axis=1, inplace=True)
     df['unit_noom'] = df['unit_noom'].apply(principal_period)
 
-    df.loc[df['view_of_noomenclature'] == 0, 'view_of_noomenclature'] = ''
-    df.loc[df['view_of_noomenclature_sub'] == 0, 'view_of_noomenclature_sub'] = ''
     df['view_noom'] = df['view_of_noomenclature'].map(str) + df['view_of_noomenclature_sub'].map(str)
     df.drop(['view_of_noomenclature', 'view_of_noomenclature_sub'], axis=1, inplace=True)
     df['view_noom'] = df['view_noom'].apply(principal_period)
 
-    df.loc[df['group_of_noomenclature'] == 0, 'group_of_noomenclature'] = ''
-    df.loc[df['group_of_noomenclature_sub'] == 0, 'group_of_noomenclature_sub'] = ''
     df['group_noom'] = df['group_of_noomenclature'].map(str) + df['group_of_noomenclature_sub'].map(str)
     df.drop(['group_of_noomenclature', 'group_of_noomenclature_sub'], axis=1, inplace=True)
     df['group_noom'] = df['group_noom'].apply(principal_period)
