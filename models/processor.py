@@ -49,7 +49,7 @@ class Processor:
         with open(f'unpacked_files/{file_name}.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         logger.info('Get data DONE------')
-        # os.remove(f'unpacked_files/{file_name}.json')
+        os.remove(f'unpacked_files/{file_name}.json')
         os.remove(f'loaded_files/{file_name}.zip')
         return data
 
@@ -171,5 +171,4 @@ class Processor:
             logger.info("year--------DONE")
         
         result_json = data_result.to_dict(orient="records")
-        print(result_json)
         return result_json
