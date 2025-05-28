@@ -8,10 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%
 logger = logging.getLogger(__name__)
 
 def prepare_to_fit(df: pd.DataFrame, target_name: str):
-    if target_name == 'group':
-        x = df.drop(columns=[target_name, 'article_cash_flow', 'details_cash_flow', 'year'], axis=1)
-        y = df[target_name]
-    elif target_name == 'article_cash_flow':
+    if target_name == 'article_cash_flow':
         x = df.drop(columns=[target_name, 'details_cash_flow', 'year'], axis=1)
         y = df[target_name]
     elif target_name == 'details_cash_flow':
@@ -26,11 +23,10 @@ def prepare_to_fit(df: pd.DataFrame, target_name: str):
 def encode_objects_fit(df: pd.DataFrame):
     target_dict = {}
     df.reverse = df.reverse.astype('str')
-    df.group = df.group.astype('str')
     list_cols = ['article_cash_flow', 'details_cash_flow', 'year', 'moving_type', 'base_article','operation_type',  
                  'payment', 'reverse', 'type_of_customer', 'type_of_contract', 'account', 'sub_account', 'calculation_account', 'calculation_account_turnover', 
                  'calculation_account_total', 'account_kredit', 'account_debet', 'account_debet_turnover', 'account_debet_total', 'name_noom', 'type_noom', 
-                 'unit_noom','view_noom', 'group_noom', 'group']
+                 'unit_noom','view_noom', 'group_noom']
     for col in list_cols:
         details = df[col].unique()
         numbers = [i for i in range(len(details))]
