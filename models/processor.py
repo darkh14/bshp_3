@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class Processor:
 
     def __init__(self, db_connector: BaseConnector):
-        self.targets = ['group', 'article_cash_flow', 'details_cash_flow', 'year']
+        self.targets = ['article_cash_flow', 'details_cash_flow', 'year']
         self.db_connector: BaseConnector = db_connector
         self.status = ModelStatuses.NOTFIT
         
@@ -69,17 +69,7 @@ class Processor:
             self.db_connector.set_lines(key, [target_dict[key]])
         logger.info("SAVE DICTS---------DONE")
         for target in self.targets:
-            if target == 'article_cash_flow':
-                names_group= list(df_encode['group'].unique())
-                for name in names_group:
-                    df_temp = df_encode[df_encode['group'] == names_group[name]]
-                    x, y = prepare_to_fit(df_temp, 'article_cash_flow')
-                    model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
-                    model.fit(x, y)
-                    logger.info(f"FIT MODEL {name}---------DONE")
-                    model_name = 'article' + str(name)
-                    self._save_model(model, model_name)
-            elif target == 'details_cash_flow':
+            if target == 'details_cash_flow':
                 names_art= list(df_encode['article_cash_flow'].unique())
                 for name in names_art:
                     df_temp = df_encode[df_encode['article_cash_flow'] == names_art[name]]
@@ -140,15 +130,8 @@ class Processor:
         data_result = data.copy()    
         for row in range(len(data)):
             data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
-            model = self._load_model('group')
-            preds = model.predict(data_to_predict.drop(columns=['document', 'group', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
-            decode_preds = decode_objects(self.db_connector, 'group', preds)
-            data_to_predict['group'] = preds[0]
-            data_result['group'][row:row+1] = decode_preds[0]
-            logger.info("group--------DONE")
-            
-            mod_name = 'article' + str(data_to_predict['group'].iloc[0])
-            model = self._load_model(mod_name)
+
+            model = self._load_model('article_cash_flow')
             preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
             data_to_predict['article_cash_flow'] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)

@@ -46,7 +46,6 @@ class DataRow(BaseModel):
     view_of_noomenclature_sub: str
     noomenclature_unit_sub: str
     group_of_noomenclature_sub: str
-    group: str
     
 
 class ModelStatuses(Enum):
