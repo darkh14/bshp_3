@@ -6,6 +6,7 @@ import shutil, os, zipfile
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 import logging
+import time
 
 from api_types import ModelStatuses
 from db_connectors.connector import BaseConnector
@@ -37,6 +38,7 @@ class Processor:
         return loaded_model
     
     def unzip_file(self, loaded_file):
+        start_time = time.time()
         os.makedirs('unpacked_files', exist_ok=True)
         os.makedirs('loaded_files', exist_ok=True)
         file_name = Path(loaded_file.filename).stem
@@ -51,6 +53,8 @@ class Processor:
         logger.info('Get data DONE------')
         os.remove(f'unpacked_files/{file_name}.json')
         os.remove(f'loaded_files/{file_name}.zip')
+        end_time = time.time()
+        print('Unzip time: ', end_time - start_time)
         return data
 
     def fit(self, data: pd.DataFrame):        
@@ -88,6 +92,26 @@ class Processor:
                 logger.info(f"SAVE MODEL {target}---------DONE")
                 accuracy = self.metrics(x, y, model)
                 logger.info(f'Accuracy {target} ----- {accuracy}')
+        # for target in self.targets:
+            # if target == 'details_cash_flow':
+            #     names_art= list(df_encode['article_cash_flow'].unique())
+            #     for name in names_art:
+            #         df_temp = df_encode[df_encode['article_cash_flow'] == names_art[name]]
+            #         x, y = prepare_to_fit(df_temp, 'details_cash_flow')
+            #         model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
+            #         model.fit(x, y)
+            #         logger.info(f"FIT MODEL {name}---------DONE")
+            #         model_name = 'details' + str(name)
+            #         self._save_model(model, model_name)
+            # else:
+            #     x, y = prepare_to_fit(df_encode, target)
+            #     model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
+            #     model.fit(x, y)
+            #     logger.info(f"FIT MODEL {target}---------DONE")
+            #     self._save_model(model, target)
+            #     logger.info(f"SAVE MODEL {target}---------DONE")
+            #     accuracy = self.metrics(x, y, model)
+            #     logger.info(f'Accuracy {target} ----- {accuracy}')        
                 
         self.status = ModelStatuses.FIT
         self.db_connector.update_status('Model_info', 'Status', 'fit')
@@ -125,33 +149,88 @@ class Processor:
         accuracy = accuracy_score(y_test, preds)
         return accuracy
     
+    # def predict(self, data: pd.DataFrame):
+    #     start_time = time.time()
+    #     data.loc[data['price'] == '', 'price'] = 0
+    #     data_result = data.copy()    
+    #     for row in range(len(data)):
+    #         data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
+
+    #         art_time = time.time()
+    #         model = self._load_model('article_cash_flow')
+    #         preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+    #         data_to_predict['article_cash_flow'] = preds[0]
+    #         decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
+    #         data_result['article_cash_flow'][row:row+1] = decode_preds[0]
+    #         logger.info("article_cash_flow--------DONE")
+    #         end_time = time.time()
+    #         print('article_cash_flow time: ', end_time - art_time)
+                
+    #         det_time = time.time()
+    #         mod_name = 'details' + str(data_to_predict['article_cash_flow'].iloc[0])
+    #         model = self._load_model(mod_name)
+    #         preds = model.predict(data_to_predict.drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
+    #         data_to_predict['details_cash_flow'] = preds[0]
+    #         decode_preds = decode_objects(self.db_connector, 'details_cash_flow', preds)
+    #         data_result['details_cash_flow'][row:row+1] = decode_preds[0]
+    #         logger.info("details_cash_flow--------DONE")
+    #         end_time = time.time()
+    #         print('details_cash_flow time: ', end_time - det_time)
+            
+    #         year_time = time.time()                
+    #         model = self._load_model('year')
+    #         preds = model.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
+    #         decode_preds = decode_objects(self.db_connector, 'year', preds)
+    #         data_to_predict['year'] = preds[0]
+    #         data_result['year'][row:row+1] = decode_preds[0]
+    #         logger.info("year--------DONE")
+    #         end_time = time.time()
+    #         print('year time: ', end_time - year_time)
+        
+    #     result_json = data_result.to_dict(orient="records")
+    #     end_time = time.time()
+    #     print('Predict time: ', end_time - start_time)
+    #     return result_json
+    
     def predict(self, data: pd.DataFrame):
+        start_time = time.time()
         data.loc[data['price'] == '', 'price'] = 0
         data_result = data.copy()    
-        for row in range(len(data)):
-            data_to_predict = transform_to_predict(self.db_connector, data[row:row+1])
+        data_to_predict = transform_to_predict(self.db_connector, data)
 
-            model = self._load_model('article_cash_flow')
-            preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
-            data_to_predict['article_cash_flow'] = preds[0]
-            decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
-            data_result['article_cash_flow'][row:row+1] = decode_preds[0]
-            logger.info("article_cash_flow--------DONE")
+        art_time = time.time()
+        model = self._load_model('article_cash_flow')
+        preds = model.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+        data_to_predict['article_cash_flow'] = preds
+        decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
+        data_result['article_cash_flow'] = decode_preds
+        logger.info("article_cash_flow--------DONE")
+        art_end_time = time.time()
                 
-            mod_name = 'details' + str(data_to_predict['article_cash_flow'].iloc[0])
+        for row in range(len(data)):        
+            # det_time = time.time()
+            mod_name = 'details' + str(data_to_predict['article_cash_flow'].iloc[row])
             model = self._load_model(mod_name)
-            preds = model.predict(data_to_predict.drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
-            data_to_predict['details_cash_flow'] = preds[0]
+            preds = model.predict(data_to_predict[row:row+1].drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
+            data_to_predict['details_cash_flow'][row] = preds[0]
             decode_preds = decode_objects(self.db_connector, 'details_cash_flow', preds)
-            data_result['details_cash_flow'][row:row+1] = decode_preds[0]
+            data_result['details_cash_flow'][row] = decode_preds[0]
             logger.info("details_cash_flow--------DONE")
-                
-            model = self._load_model('year')
-            preds = model.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
-            decode_preds = decode_objects(self.db_connector, 'year', preds)
-            data_to_predict['year'] = preds[0]
-            data_result['year'][row:row+1] = decode_preds[0]
-            logger.info("year--------DONE")
+            # end_time = time.time()
+            # print('details_cash_flow time: ', end_time - det_time)
+            
+        year_time = time.time()                
+        model = self._load_model('year')
+        preds = model.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
+        decode_preds = decode_objects(self.db_connector, 'year', preds)
+        data_to_predict['year'] = preds
+        data_result['year'] = decode_preds
+        logger.info("year--------DONE")
+        end_time = time.time()
+        print('year time: ', end_time - year_time)
+        print('article_cash_flow time: ', art_end_time - art_time)
         
         result_json = data_result.to_dict(orient="records")
+        end_time = time.time()
+        print('Predict time: ', end_time - start_time)
         return result_json

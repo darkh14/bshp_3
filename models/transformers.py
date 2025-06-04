@@ -3,6 +3,7 @@ import re
 from db_connectors.connector import BaseConnector
 import random
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def change_payment(s: str):
     
     
 def tramsform_data(df: pd.DataFrame):
+    start_time = time.time()
     df.drop_duplicates(inplace=True, ignore_index=True)
     df.drop(['date', 'document', 'base_name', 'unit_of_count', 'is_service'], axis=1, inplace=True)
     if 'name_of_main_asset' in df.columns:
@@ -85,15 +87,20 @@ def tramsform_data(df: pd.DataFrame):
     df.drop(['group_of_noomenclature', 'group_of_noomenclature_sub'], axis=1, inplace=True)
     df['group_noom'] = df['group_noom'].apply(principal_period)
     logger.info("MERGE COLUMNS--------DONE")
+    end_time = time.time()
+    print('MERGE COLUMNS time: ', end_time - start_time)
         
     df['name_noom'] = df['name_noom'].apply(change_name)
     df.loc[df['payment'] == 0, 'payment'] = ''
     df['payment'] = df['payment'].apply(change_payment)
+    end_time = time.time()
     logger.info("TRANSFORM DATA--------DONE")
+    print('TRANSFORM DATA time: ', end_time - start_time)
         
     return df
     
 def transform_to_predict(db_connector: BaseConnector, df: pd.DataFrame):
+    start_time = time.time()
     df_copy = df.copy()
     df_transform = tramsform_data(df)
     df_transform['document'] = df_copy['document']
@@ -110,10 +117,13 @@ def transform_to_predict(db_connector: BaseConnector, df: pd.DataFrame):
                 new_key = random.choice(list(result.keys()))
                 df_transform.loc[row, col] = result[new_key]
     logger.info("TRANSFORM TO PREDICT--------DONE")
+    end_time = time.time()
+    print('TRANSFORM TO PREDICT time: ', end_time - start_time)
     return df_transform
 
 
 def decode_objects(db_connector: BaseConnector, target: str, predicts: list):
+    start_time = time.time()
     names_dict = db_connector.get_lines(target)[0]
     result_list = []
     for i in range(len(predicts)):
@@ -121,4 +131,6 @@ def decode_objects(db_connector: BaseConnector, target: str, predicts: list):
             if predicts[i] == names_dict[key]:
                 result_list.append(key)
     logger.info("DECODE--------DONE")
+    end_time = time.time()
+    print('DECODE time: ', end_time - start_time)
     return result_list
