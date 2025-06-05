@@ -45,11 +45,11 @@ def save_data(loaded_file: UploadFile = File(...)) -> str:
 
 
 @app.post('/predict')
-def predict(loaded_file: UploadFile = File(...)) -> list[DataRow]:
+def predict(loaded_data: list[DataRow]) -> list[DataRow]:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
-    data_save = processor.unzip_file(loaded_file)
-    data_to_predict = pd.DataFrame(data_save)
+    # data_save = processor.unzip_file(loaded_file)
+    data_to_predict = pd.DataFrame([row.model_dump() for row in loaded_data])
     return processor.predict(data_to_predict)
 
 
