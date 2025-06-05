@@ -54,7 +54,7 @@ def change_name(s: str):
 def change_payment(s: str):
     if s !='':
         pattern = re.compile(r'\w+')
-        result = pattern.findall(s)[0:3]
+        result = pattern.findall(s)[0:4]
         s = ' '.join(result) 
     return s
     
