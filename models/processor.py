@@ -29,9 +29,7 @@ class Processor:
         self.targets = ['article_cash_flow', 'details_cash_flow', 'year']
         self.db_connector: BaseConnector = db_connector
         self.status = ModelStatuses.NOTFIT
-        # self.model_art = None
-        # self.model_year = None
-        
+      
     def _save_model(self, model, target):
         model_name = 'model_' + target
         path = 'saved_models/'
@@ -104,6 +102,8 @@ class Processor:
         self.db_connector.update_status('Model_info', 'Status', 'fit')
         logger.info("--------ALL DONE--------")
         self.db_connector.update_status('Model_info', 'fitting_end_date', datetime.now(timezone.utc))
+        global MODEL_ART, MODEL_YEAR, MODEL_DET
+        MODEL_ART, MODEL_YEAR, MODEL_DET = None, None, {}
                 
     def get_info(self) -> dict[str, Any]:
         try:
@@ -149,7 +149,6 @@ class Processor:
         global MODEL_ART
         if MODEL_ART == None:
             MODEL_ART = self._load_model('article_cash_flow')
-        # model = self._load_model('article_cash_flow')
         preds = MODEL_ART.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
         data_to_predict['article_cash_flow'] = preds
         decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
@@ -164,8 +163,6 @@ class Processor:
                     MODEL_DET[name] = self._load_model(name[6:])
         for row in range(len(data)):        
             mod_name = 'model_details' + str(data_to_predict['article_cash_flow'].iloc[row])
-            # model = self._load_model(mod_name)
-            model = MODEL_DET[mod_name]
             preds = MODEL_DET[mod_name].predict(data_to_predict[row:row+1].drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
             data_to_predict['details_cash_flow'][row] = preds[0]
             logger.info("details_cash_flow--------DONE")
@@ -176,7 +173,6 @@ class Processor:
         global MODEL_YEAR
         if MODEL_YEAR == None:
             MODEL_YEAR = self._load_model('year')                
-        # model = self._load_model('year')
         preds = MODEL_YEAR.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
         decode_preds = decode_objects(self.db_connector, 'year', preds)
         data_to_predict['year'] = preds

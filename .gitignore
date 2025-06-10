@@ -5,4 +5,5 @@
 /saved_models/*
 /loaded_files/*
 /unpacked_files/*
+/db/*
 __pycache__
