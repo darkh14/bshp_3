@@ -19,14 +19,15 @@ from zipfile import ZipFile
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
-MODEL_ART = None
+MODEL_GROUP = None
+MODEL_ART = {}
 MODEL_YEAR = None
 MODEL_DET = {}
 
 class Processor:
 
     def __init__(self, db_connector: BaseConnector):
-        self.targets = ['article_cash_flow', 'details_cash_flow', 'year']
+        self.targets = ['group', 'article_cash_flow', 'details_cash_flow', 'year']
         self.db_connector: BaseConnector = db_connector
         self.status = ModelStatuses.NOTFIT
       
@@ -78,7 +79,17 @@ class Processor:
         logger.info("SAVE DICTS---------DONE")
         
         for target in self.targets:
-            if target == 'details_cash_flow':
+            if target == 'article_cash_flow':
+                names_groups= list(df_encode['group'].unique())
+                for name in names_groups:
+                    df_temp = df_encode[df_encode['group'] == names_groups[name]]
+                    x, y = prepare_to_fit(df_temp, 'article_cash_flow')
+                    model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
+                    model.fit(x, y)
+                    logger.info(f"FIT MODEL {name}---------DONE")
+                    model_name = 'article' + str(name)
+                    self._save_model(model, model_name)
+            elif target == 'details_cash_flow':
                 names_art= list(df_encode['article_cash_flow'].unique())
                 for name in names_art:
                     df_temp = df_encode[df_encode['article_cash_flow'] == names_art[name]]
@@ -100,10 +111,9 @@ class Processor:
                 
         self.status = ModelStatuses.FIT
         self.db_connector.update_status('Model_info', 'Status', 'fit')
-        logger.info("--------ALL DONE--------")
+        logger.info("--------FIT  DONE--------")
         self.db_connector.update_status('Model_info', 'fitting_end_date', datetime.now(timezone.utc))
-        global MODEL_ART, MODEL_YEAR, MODEL_DET
-        MODEL_ART, MODEL_YEAR, MODEL_DET = None, None, {}
+
                 
     def get_info(self) -> dict[str, Any]:
         try:
@@ -140,27 +150,28 @@ class Processor:
     
        
     def predict(self, data: pd.DataFrame):
+        # global MODEL_ART, MODEL_DET, MODEL_YEAR
         start_time = time.time()
         data.loc[data['price'] == '', 'price'] = 0
         data_result = data.copy()    
         data_to_predict = transform_to_predict(self.db_connector, data)
 
-        art_time = time.time()
-        global MODEL_ART
-        if MODEL_ART == None:
-            MODEL_ART = self._load_model('article_cash_flow')
-        preds = MODEL_ART.predict(data_to_predict.drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
-        data_to_predict['article_cash_flow'] = preds
-        decode_preds = decode_objects(self.db_connector, 'article_cash_flow', preds)
-        data_result['article_cash_flow'] = decode_preds
-        logger.info("article_cash_flow--------DONE")
-        art_end_time = time.time()      
+        group_time = time.time()
+        preds = MODEL_GROUP.predict(data_to_predict.drop(columns=['document', 'group', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+        data_to_predict['group'] = preds
+        decode_preds = decode_objects(self.db_connector, 'group', preds)
+        data_result['group'] = decode_preds
+        logger.info("group--------DONE")
+        group_end_time = time.time()     
         
-        global MODEL_DET
-        if len(MODEL_DET) == 0:
-             for name in os.listdir('saved_models'):
-                  if 'details' in name:
-                    MODEL_DET[name] = self._load_model(name[6:])
+        for row in range(len(data)):        
+            mod_name = 'model_article' + str(data_to_predict['group'].iloc[row])
+            preds = MODEL_ART[mod_name].predict(data_to_predict[row:row+1].drop(columns=['document', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+            data_to_predict['article_cash_flow'][row] = preds[0]
+            logger.info("article_cash_flow--------DONE")
+        decode_preds = decode_objects(self.db_connector, 'article_cash_flow', data_to_predict['article_cash_flow'])
+        data_result['article_cash_flow'] = decode_preds 
+
         for row in range(len(data)):        
             mod_name = 'model_details' + str(data_to_predict['article_cash_flow'].iloc[row])
             preds = MODEL_DET[mod_name].predict(data_to_predict[row:row+1].drop(columns=['document', 'details_cash_flow', 'year'], axis=1))
@@ -169,10 +180,7 @@ class Processor:
         decode_preds = decode_objects(self.db_connector, 'details_cash_flow', data_to_predict['details_cash_flow'])
         data_result['details_cash_flow'] = decode_preds
             
-        year_time = time.time()
-        global MODEL_YEAR
-        if MODEL_YEAR == None:
-            MODEL_YEAR = self._load_model('year')                
+        year_time = time.time()           
         preds = MODEL_YEAR.predict(data_to_predict.drop(columns=['document', 'year'], axis=1))
         decode_preds = decode_objects(self.db_connector, 'year', preds)
         data_to_predict['year'] = preds
@@ -180,9 +188,21 @@ class Processor:
         logger.info("year--------DONE")
         end_time = time.time()
         print('year time: ', end_time - year_time)
-        print('article_cash_flow time: ', art_end_time - art_time)
-        
+        print('group time: ', group_end_time - group_time)
         result_json = data_result.to_dict(orient="records")
         end_time = time.time()
         print('Predict time: ', end_time - start_time)
+        # print(result_json)
         return result_json
+    
+    def set_global(self):
+        global MODEL_ART, MODEL_YEAR, MODEL_DET, MODEL_GROUP
+        MODEL_GROUP = self._load_model('group')
+        for name in os.listdir('saved_models'):
+            if 'article' in name:
+                MODEL_ART[name] = self._load_model(name[6:])
+        for name in os.listdir('saved_models'):
+            if 'details' in name:
+                MODEL_DET[name] = self._load_model(name[6:])
+        MODEL_YEAR = self._load_model('year')
+        logger.info("--------Global models DONE--------")

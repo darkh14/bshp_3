@@ -1,4 +1,6 @@
 import fastapi
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 import uvicorn
 import pandas as pd
 from pandas import DataFrame
@@ -8,11 +10,30 @@ from db_connectors.connector import MongoConnector
 from api_types import DataRow
 from version import VERSION
 from fastapi.responses import FileResponse
+import logging
+from starlette.background import BackgroundTasks
 
 
-app = fastapi.FastAPI(title="BSHP App",  
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting load global models")
+    try:        
+        db_connector = MongoConnector("BSHP")
+        processor = Processor(db_connector)
+        processor.set_global()
+        logger.info("Loading global models DONE")
+    except Exception as e:
+        logger.info(f"Failed to load models, {e}")
+    yield
+
+
+app = FastAPI(title="BSHP App",  
                       description="Application for AI cash flow parameters predictions!",
-                      version=VERSION)
+                      version=VERSION,
+                      lifespan=lifespan)
 
 
 @app.get('/')
@@ -93,8 +114,10 @@ def fit_background_new(data: DataFrame) -> bool:
     db_connector = MongoConnector("BSHP")
     processor = Processor(db_connector)
     processor.fit(data)
+    processor.set_global()
     return True
 
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8090, log_level="info")
+
