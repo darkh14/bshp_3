@@ -5,11 +5,15 @@ import random
 import logging
 import time
 
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
 def prepare_to_fit(df: pd.DataFrame, target_name: str):
-    if target_name == 'article_cash_flow':
+    if target_name == 'group':
+        x = df.drop(columns=[target_name, 'article_cash_flow', 'details_cash_flow', 'year'], axis=1)
+        y = df[target_name]
+    elif target_name == 'article_cash_flow':
         x = df.drop(columns=[target_name, 'details_cash_flow', 'year'], axis=1)
         y = df[target_name]
     elif target_name == 'details_cash_flow':
@@ -27,7 +31,7 @@ def encode_objects_fit(df: pd.DataFrame):
     list_cols = ['article_cash_flow', 'details_cash_flow', 'year', 'moving_type', 'base_article','operation_type',  
                  'payment', 'reverse', 'type_of_customer', 'type_of_contract', 'account', 'sub_account', 'calculation_account', 'calculation_account_turnover', 
                  'calculation_account_total', 'account_kredit', 'account_debet', 'account_debet_turnover', 'account_debet_total', 'name_noom', 'type_noom', 
-                 'unit_noom','view_noom', 'group_noom']
+                 'unit_noom','view_noom', 'group_noom', 'group']
     for col in list_cols:
         details = df[col].unique()
         numbers = [i for i in range(len(details))]
@@ -61,8 +65,9 @@ def change_payment(s: str):
     
 def tramsform_data(df: pd.DataFrame):
     start_time = time.time()
+    df['date'] = df['date'].apply(lambda x: int(x[3:5]))
     df.drop_duplicates(inplace=True, ignore_index=True)
-    df.drop(['date', 'document', 'base_name', 'unit_of_count', 'is_service'], axis=1, inplace=True)
+    df.drop(['document', 'base_name', 'unit_of_count', 'is_service'], axis=1, inplace=True)
     if 'name_of_main_asset' in df.columns:
         df.drop(['name_of_main_asset', 'type_of_main_asset', 'group_of_main_asset'], axis=1, inplace=True)
     df.reverse = df.reverse.astype('str')
