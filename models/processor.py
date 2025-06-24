@@ -150,14 +150,18 @@ class Processor:
     
        
     def predict(self, data: pd.DataFrame):
-        # global MODEL_ART, MODEL_DET, MODEL_YEAR
         start_time = time.time()
+        # data_json = data.to_dict(orient="records")
+        # print(data_json)
         data.loc[data['price'] == '', 'price'] = 0
         data_result = data.copy()    
         data_to_predict = transform_to_predict(self.db_connector, data)
+        # pred_json = data_to_predict.to_dict(orient="records")
+        # print(pred_json)
 
         group_time = time.time()
         preds = MODEL_GROUP.predict(data_to_predict.drop(columns=['document', 'group', 'article_cash_flow', 'details_cash_flow', 'year'], axis=1))
+        # print(preds)
         data_to_predict['group'] = preds
         decode_preds = decode_objects(self.db_connector, 'group', preds)
         data_result['group'] = decode_preds
