@@ -91,6 +91,7 @@ def tramsform_data(df: pd.DataFrame):
     df['group_noom'] = df['group_of_noomenclature'].map(str) + df['group_of_noomenclature_sub'].map(str)
     df.drop(['group_of_noomenclature', 'group_of_noomenclature_sub'], axis=1, inplace=True)
     df['group_noom'] = df['group_noom'].apply(principal_period)
+  
     logger.info("MERGE COLUMNS--------DONE")
     end_time = time.time()
     print('MERGE COLUMNS time: ', end_time - start_time)
