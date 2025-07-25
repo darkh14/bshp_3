@@ -1,63 +1,116 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from enum import Enum
 from datetime import datetime
 
-from typing import Optional
+from typing import Optional, Dict
 
+
+class TaskData(BaseModel):
+    task_id: str
+    type: str = 'FIT'
+    status: str = "CREATED"
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    error: Optional[str] = None
+    base_name: Optional[str] = None
+    replace: Optional[bool] = None
+    model_type: Optional[str] = None
+
+    # Внутренние поля
+    file_path: Optional[str] = None
+
+
+class TaskResponse(BaseModel):
+    task_id: str
+    message: str
+
+
+class StatusResponse(BaseModel):
+    status: str
+    error: Optional[str] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    description: Optional[str] = None
+
+
+class ProcessingTaskResponse(BaseModel):
+    task_id: str
+    type: str
+    base_name: str
+    status: str    
+    
 
 class DataRow(BaseModel):
     """
     Loading, input or output data row
     """
-    base_name: str
-    document: str
-    article_cash_flow: str
-    details_cash_flow: str
+    number: str 
+    date: datetime
+    is_reverse: bool
+    moving_type: str
+    company_inn: str
+    company_kpp: str
+    base_document_number: str
+    base_document_date: datetime
+    base_document_kind: str
+    base_document_operation_type: str
+    contractor_name: str
+    contractor_inn: str
+    contractor_kpp: str
+    contractor_kind: str
+    article_name: str
+    article_code: str
+    is_main_asset: bool
+    analytic: str
+    analytic2: str
+    analytic3: str
+    article_parent: str
+    article_group: str
+    article_kind: str
+    store: str
+    department: str
+    company_account_number: str
+    contractor_account_number: str
     qty: float
     price: float
     sum: float
+    cash_flow_item_code: str
     year: str
-    unit_of_count: str
-    is_service: bool
-    moving_type: str
-    base_article: str
-    operation_type: str
-    date: str
-    payment: str
-    reverse: bool
-    type_of_customer: str
-    type_of_contract: str
-    account: str
-    sub_account: str
-    calculation_account: str
-    calculation_account_turnover: str
-    calculation_account_total: str
-    account_kredit: str
-    account_debet: str
-    account_debet_turnover: str
-    account_debet_total: str
-    name_of_noomenclature: str
-    type_of_noomenclature: str
-    view_of_noomenclature: str
-    noomenclature_unit: str
-    group_of_noomenclature: str
-    name_of_noomenclature_sub: str
-    type_of_noomenclature_sub: str
-    view_of_noomenclature_sub: str
-    noomenclature_unit_sub: str
-    group_of_noomenclature_sub: str
-    group: str
+    cash_flow_details_code: str
+
+    @field_validator('date', mode='before')
+    def check_date(cls, value):
+        if isinstance(value, str):
+            result = datetime.strptime(value, r'%d.%m.%Y %H:%M:%S')
+        else: 
+            result = value
+
+        return result
+    
+    @field_validator('base_document_date', mode='before')
+    def check_base_document(cls, value):
+        if isinstance(value, str):
+            result = datetime.strptime(value, r'%d.%m.%Y %H:%M:%S')
+        else: 
+            result = value
+
+        return result            
     
 
 class ModelStatuses(Enum):
-    NOTFIT = 'not_fit'
-    INPROGRESS = 'in_progress'
-    FIT = 'fit'
-    ERROR = 'error'
-    NEEDFIT = 'need_to_fit'
+    CREATED = 'CREATED'
+    FITTING = 'FITTING'    
+    READY = 'READY'
+    ERROR = 'ERROR'
 
 
 class ModelInfo(BaseModel):
     status: ModelStatuses
+    error_text: str
     fitting_start_date: Optional[datetime]
     fitting_end_date: Optional[datetime]
+    metrics: Optional[Dict[str, float]]
+
+
+class ModelTypes(str, Enum):
+    rf = 'rf'
