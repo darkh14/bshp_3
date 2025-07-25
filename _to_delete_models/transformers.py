@@ -1,6 +1,6 @@
 import pandas as pd
 import re
-from db_connectors.connector import BaseConnector
+from _to_delete_db_connectors.connector import BaseConnector
 import random
 import logging
 import time

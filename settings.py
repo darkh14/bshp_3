@@ -1,9 +1,25 @@
+from pydantic_settings import BaseSettings
+from pathlib import Path
 import os
 
-DB_HOST = os.getenv('DB_HOST', default='localhost')
-DB_PORT = int(os.getenv('DB_PORT', default='27017'))
-DB_USER = os.getenv('DB_USER', default='')
-DB_PASSWORD = os.getenv('DB_PASSWORD', default='')
-DB_AUTH_SOURCE = os.getenv('DB_AUTH_SOURCE', default='')
+VERSION = '3.0.0.0'
+BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
+
+class Settings(BaseSettings):
+    DB_URL: str = 'mongodb://localhost:27017'
+    SOURCE_FOLDER: Path = BASE_DIR / 'data/source'
+    TEMP_FOLDER: Path = BASE_DIR / 'data/temp'
+    TEST_MODE: bool = False
+    AUTH_SERVICE_URL: str = ''
+    class Config:
+        env_file = "../.env"
+        extra = 'allow'
+        
+settings = Settings()
+
+for key, value in settings.__dict__.items():
+    if not key.startswith('_'):
+        globals()[key] = value  
+
 
 

@@ -5,7 +5,7 @@ from abc import ABCMeta, abstractmethod
 from pymongo import MongoClient
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError, OperationFailure
 
-from settings import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_AUTH_SOURCE
+from settings import MONGODB_URL
 from errors import DBConnectorException
 
 
@@ -59,7 +59,7 @@ class BaseConnector():
 class MongoConnector(BaseConnector):
     
     def __init__(self, base_name: str) -> None:
-        self._connection_string = self._form_connection_string()
+        self._connection_string = MONGODB_URL 
         self.base_name = base_name
         self._connect()
 
@@ -188,22 +188,6 @@ class MongoConnector(BaseConnector):
             self._db = client[self.base_name]
         except ConfigurationError as conf_ex:
             raise ConfigurationError('Configuration error! ' + str(conf_ex))
-
-    def _form_connection_string(self) -> str:
-        """Forms connection string from setting vars
-        for example 'mongodb://username:password@localhost:27017/?authSource=admin'
-        :return: connection string
-        """
-
-        if DB_USER:
-            result = 'mongodb://{user}:{password}@{host}:{port}/'.format(user=DB_USER, password=DB_PASSWORD,
-                                                                         host=DB_HOST, port=DB_PORT)
-            if DB_AUTH_SOURCE:
-                result += '?authSource={auth_source}'.format(auth_source=DB_AUTH_SOURCE)
-        else:
-            result = 'mongodb://{host}:{port}/'.format(host=DB_HOST, port=DB_PORT)
-
-        return result
     
     def _get_collection(self, collection_name):
         """ Gets collection object from db object

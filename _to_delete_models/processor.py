@@ -9,9 +9,9 @@ import logging
 import time
 
 from api_types import ModelStatuses
-from db_connectors.connector import BaseConnector
+from _to_delete_db_connectors.connector import BaseConnector
 from errors import ModuleBaseException
-from models.transformers import prepare_to_fit, encode_objects_fit, tramsform_data, transform_to_predict, decode_objects
+from _to_delete_models.transformers import prepare_to_fit, encode_objects_fit, tramsform_data, transform_to_predict, decode_objects
 import joblib, json
 from pathlib import Path
 from zipfile import ZipFile
