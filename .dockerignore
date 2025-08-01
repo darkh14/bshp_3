@@ -5,6 +5,7 @@
 *.xlsx
 *.json
 *.env
+*.mdl
 
 **/.git
 __pycache__
@@ -15,3 +16,5 @@ __pycache__
 /logs
 /.venv
 /.vscode
+**/models
+**/data

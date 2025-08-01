@@ -1,13 +1,11 @@
 from contextlib import asynccontextmanager
 from typing import Optional
-
+import asyncio
 from fastapi import FastAPI, APIRouter, Header, HTTPException, BackgroundTasks, File, UploadFile, Depends, Query, Path, Body
+from cachetools import TTLCache
+import aiohttp
 
-# from models.processor import Processor
-# from db_connectors.connector import MongoConnector
-
-
-from settings import VERSION, DB_URL
+from settings import VERSION, DB_URL, TEST_MODE, AUTH_SERVICE_URL
 from fastapi.responses import HTMLResponse # FileResponse
 
 import logging
@@ -15,66 +13,59 @@ import uuid
 
 from tasks import task_manager
 from data_processing import data_loader
-from api_types import TaskResponse, ModelTypes, ModelInfo, DataRow
+from api_types import TaskResponse, ModelTypes, ModelInfo, DataRow, ModelStatuses, StatusResponse
 from db import db_processor
 from models import model_manager
-
-
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
+auth_cache = TTLCache(maxsize=1000, ttl=300)
+
 
 async def check_token(token: str = Header()) -> bool:
     """Проверка токена авторизации с кэшем и защитой от сбоев."""
-    return True
-    # if config.TEST_MODE: # type: ignore
-    #     return True
 
-    # if token in auth_cache:
-    #     return True
+    if TEST_MODE:
+        return True
 
-    # timeout = aiohttp.ClientTimeout(total=10)
+    if token in auth_cache:
+        return True
 
-    # try:
-    #     async with aiohttp.ClientSession(timeout=timeout) as session:
-    #         async with session.post(
-    #             f"{config.AUTH_SERVICE_URL}/check-token", # type: ignore
-    #             json={"token": token}
-    #         ) as response:
-    #             if response.status == 200:
-    #                 auth_cache[token] = True
-    #                 return True
-    #             elif response.status == 404:
-    #                 raise HTTPException(status_code=401, detail="Invalid token")
-    #             elif response.status == 403:
-    #                 raise HTTPException(status_code=401, detail="Token expired")
-    #             else:
-    #                 logger.error(f"Auth service returned unexpected status {response.status}")
-    #                 raise HTTPException(status_code=500, detail="Authentication service error")
+    timeout = aiohttp.ClientTimeout(total=10)
 
-    # except asyncio.TimeoutError:
-    #     logger.error("Auth request timed out")
-    #     raise HTTPException(status_code=503, detail="Authorization timeout")
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{AUTH_SERVICE_URL}/check_token", # type: ignore
+                json={"token": token}
+            ) as response:
+                if response.status == 200:
+                    auth_cache[token] = True
+                    return True
+                elif response.status == 404:
+                    raise HTTPException(status_code=401, detail="Invalid token")
+                elif response.status == 403:
+                    raise HTTPException(status_code=401, detail="Token expired")
+                else:
+                    logger.error(f"Auth service returned unexpected status {response.status}")
+                    raise HTTPException(status_code=500, detail="Authentication service error")
 
-    # except aiohttp.ClientError as e:
-    #     logger.warning(f"Auth service connection error: {str(e)}")
-    #     raise HTTPException(status_code=503, detail="Authorization service unavailable")
+    except asyncio.TimeoutError:
+        logger.error("Auth request timed out")
+        raise HTTPException(status_code=503, detail="Authorization timeout")
 
-    # except Exception as e:
-    #     logger.exception("Unexpected error in check_token")
-    #     raise HTTPException(status_code=500, detail="Internal auth error")
-    
-    # """
-    # Извлекает токен из заголовка запроса.
+    except aiohttp.ClientError as e:
+        logger.warning(f"Auth service connection error: {str(e)}")
+        raise HTTPException(status_code=503, detail="Authorization service unavailable")
 
-    # Args:
-    #     token: Токен из заголовка X-API-Token
+    except Exception as e:
+        logger.exception("Unexpected error in check_token")
+        raise HTTPException(status_code=500, detail="Internal auth error")
 
-    # Returns:
-    #     str: Токен авторизации
-    # """
-    # return token
+
+async def get_token_from_header(token: Optional[str] = Header(None, alias="token")):
+    return token
 
 
 @asynccontextmanager
@@ -101,7 +92,6 @@ async def lifespan(app: FastAPI):
     yield 
 
     try:
-        """Закрытие подключения к базе данных при остановке"""
         app.db.close()
         logger.info("Database connection closed")
 
@@ -109,7 +99,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Database shutdown error: {e}")
         raise
    
-    logger.info("Shutting down transcription service...")    
+    logger.info("Shutting down prediction service...")    
 
 
 app = FastAPI(title="BSHP App",  
@@ -170,18 +160,23 @@ async def process_fitting_model(task_id: str):
 
         # Execute loading
         model = model_manager.get_model(task.model_type, task.base_name)
-        data_filter = {'base_name': task.base_name} if task.base_name else None
+        if model.status == ModelStatuses.FITTING:
+            raise ValueError('Current model is already fitting')
+        
+        data_filter = {'base_name': task.base_name} if task.base_name != 'all_bases' else None
         await model.fit({'data_filter': data_filter})
 
         logger.info("Start writing model to db")
-        await model_manager.write_model(model)
-        logger.info("Writing model to db. Done")
-
-        logger.info(f"[{task_id}] fitting task completed")
+        try:
+            await model_manager.write_model(model)
+        except Exception as e:
+            model.status = ModelStatuses.ERROR
+            raise e
+        logger.info("Writing model to db. Done")     
 
         # Update status
+        logger.info(f"[{task_id}] fitting task completed")
         await task_manager.update_task(task_id, status="READY", progress=100)
-
         logger.info(f"[{task_id}] Task marked READY")
 
     except Exception as e:
@@ -206,6 +201,7 @@ async def save_data(
         background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
         base_name: str = Query(),
+        token: str = Depends(get_token_from_header),
         authenticated: bool = Depends(check_token),
         replace: bool = Query(default=False)) -> TaskResponse:
     
@@ -249,8 +245,11 @@ async def save_data(
 
 
 @app.get('/delete_data')
-async def delete_data(base_name: str) -> str:
+async def delete_data(base_name: str = Query(default=''),
+                      token: str = Depends(get_token_from_header),
+                      authenticated: bool = Depends(check_token),) -> str:
     db_filter = None
+
     if base_name:
         db_filter = {'base_name': base_name}
     await data_loader.delete_data(db_filter)
@@ -259,8 +258,10 @@ async def delete_data(base_name: str) -> str:
 
 @app.get('/fit')
 async def fit(background_tasks: BackgroundTasks,
+              token: str = Depends(get_token_from_header),
+              authenticated: bool = Depends(check_token),
               base_name: str = Query(default=''),
-              model_type: ModelTypes = Query(default='rf')) -> TaskResponse:
+              model_type: ModelTypes = Query(default=ModelTypes.rf)) -> TaskResponse:
 
     logger.info(f"Starting fitting model")
 
@@ -268,7 +269,8 @@ async def fit(background_tasks: BackgroundTasks,
     task = await task_manager.create_task(task_id)
 
     try:
-
+        if not base_name:
+            base_name = 'all_bases'
         # Update task
         await task_manager.update_task(
             task_id,
@@ -292,72 +294,62 @@ async def fit(background_tasks: BackgroundTasks,
 
 @app.get('/delete_model')
 async def delete_model(base_name: str = Query(default=''),
-              model_type: ModelTypes = Query(default='rf')) -> str:
+                       model_type: ModelTypes = Query(default=ModelTypes.rf),
+                       token: str = Depends(get_token_from_header),
+                       authenticated: bool = Depends(check_token)) -> str:
     try:
+        if not base_name:
+            base_name = 'all_bases'        
         await model_manager.delete_model(model_type=model_type.value, base_name=base_name)
         return 'Model has been deleted'
     except Exception as e:
         logger.error(f"Error deleting model: {e}")
         raise HTTPException(status_code=500, detail=str(e))   
 
+
 @app.get('/get_model_info')
 async def get_model_info(base_name: str = Query(default=''),
-              model_type: ModelTypes = Query(default='rf')) -> ModelInfo:
+                         model_type: ModelTypes = Query(default=ModelTypes.rf),
+                         token: str = Depends(get_token_from_header),
+                         authenticated: bool = Depends(check_token)) -> ModelInfo:
     try:
+        if not base_name:
+            base_name = 'all_bases'        
         result = await model_manager.get_info(model_type=model_type.value, base_name=base_name)
         return ModelInfo.model_validate(result)
     except Exception as e:
         logger.error(f"Error getting model info: {e}")
         raise HTTPException(status_code=500, detail=str(e))      
 
+
 @app.post('/predict')
 async def predict(X: list[DataRow], 
                   base_name: str = Query(default=''),
-                  model_type: ModelTypes = Query(default='rf')) -> list[DataRow]:
-    
-    X_list = []
-    for row in X:
-        X_list.append(row.model_dump())
-    model = model_manager.get_model(model_type, base_name)
-    result = []
-    X_y_list = await model.predict(X_list)
-    for row in X_y_list:
-        result.append(DataRow.model_validate(row))
+                  model_type: ModelTypes = Query(default=ModelTypes.rf),
+                  token: str = Depends(get_token_from_header),
+                  authenticated: bool = Depends(check_token)) -> list[DataRow]:
+    try:    
+        if not base_name:
+            base_name = 'all_bases'         
+        X_list = []
+        for row in X:
+            X_list.append(row.model_dump())
+        model = model_manager.get_model(model_type, base_name)
+        result = []
+        X_y_list = await model.predict(X_list)
+        for row in X_y_list:
+            result.append(DataRow.model_validate(row))
+    except Exception as e:
+        logger.error(f"Error predicting: {e}")
+        raise HTTPException(status_code=500, detail=str(e))           
 
     return result
 
 
-# @app.get('/get_info')
-# def get_info() -> dict:
-#     db_connector = MongoConnector("BSHP")
-#     processor = Processor(db_connector)
-#     return processor.get_info()
+@app.get('/get_task_status')
+async def get_task_status(task_id: str = Query(),
+                          token: str = Depends(get_token_from_header),
+                          authenticated: bool = Depends(check_token)) -> StatusResponse:
+    status = await task_manager.get_task_status(task_id)
 
-
-# @app.get('/drop_fitting')
-# def drop_fitting() -> str:
-#     db_connector = MongoConnector("BSHP")
-#     processor = Processor(db_connector)
-#     processor.drop_fitting()    
-#     return 'fitting is dropped'
-
-
-
-
-
-
-
-
-# @app.get('/delete_all_data')
-# def delete_all_data():
-#     db_connector = MongoConnector("BSHP")
-#     db_connector.drop_all_db()
-#     return 'Datas has been deleted'
-
-
-# def fit_background_new(data: DataFrame) -> bool:
-#     db_connector = MongoConnector("BSHP")
-#     processor = Processor(db_connector)
-#     processor.fit(data)
-#     processor.set_global()
-#     return True
+    return status

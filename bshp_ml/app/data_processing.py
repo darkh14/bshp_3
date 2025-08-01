@@ -122,6 +122,7 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         self.for_predict = for_predict
         self.x_columns = self.parameters['x_columns']
         self.y_columns = self.parameters['y_columns']
+        self.additional_columns = self.parameters['additional_columns']
         self.columns_to_encode = self.parameters['columns_to_encode']
 
         self.encode_dict = {}
@@ -149,7 +150,7 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         X['document_year'] = X['date'].apply(self._get_year)
         X['document_month'] = X['date'].apply(self._get_month)
 
-        X = X[self.x_columns + self.y_columns]
+        X = X[self.additional_columns + self.x_columns + self.y_columns]
         logger.info("Encoding data. Done")  
         return X
 

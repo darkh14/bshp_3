@@ -1,8 +1,8 @@
 FROM python:3.12.4
  
-LABEL authors="nickgott"
+LABEL authors="dark_h14"
 
-WORKDIR /
+WORKDIR /app
 
 EXPOSE 8061:8061
 

@@ -6,4 +6,6 @@
 /loaded_files/*
 /unpacked_files/*
 /db/*
+//data/*
+//models/*
 __pycache__

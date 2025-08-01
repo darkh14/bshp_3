@@ -2,17 +2,18 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 import os
 
-VERSION = '3.0.0.0'
-BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
+VERSION = '3.0.0.1'
+BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class Settings(BaseSettings):
     DB_URL: str = 'mongodb://localhost:27017'
     SOURCE_FOLDER: Path = BASE_DIR / 'data/source'
     TEMP_FOLDER: Path = BASE_DIR / 'data/temp'
+    MODEL_FOLDER: Path = BASE_DIR / 'models'
     TEST_MODE: bool = False
     AUTH_SERVICE_URL: str = ''
     class Config:
-        env_file = "../.env"
+        env_file = "../../.env"
         extra = 'allow'
         
 settings = Settings()
