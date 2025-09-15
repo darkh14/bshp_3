@@ -1,0 +1,37 @@
+version: "3"
+
+services:
+  app:
+    container_name: bshp_v3
+    image: dark_h14/bshp_v3:latest
+    environment:
+      - DB_HOST=db
+      - DB_PORT=27017
+      - TEST_MODE=true
+      - DB_URL=mongodb://db:27017      
+    build:
+        context: ./bshp_ml
+        dockerfile: Dockerfile      
+    ports:
+      - "8061:8061"
+    volumes:
+      - ./models:/models
+    networks:
+      - custom
+    depends_on:
+      - db
+    restart: unless-stopped      
+  db:
+
+    image: mongo:6.0.21
+    container_name: bshp_db 
+    ports:
+      - "27117:27017"
+    volumes:
+      - ./db/data:/data/db
+    networks:
+      - custom
+
+networks:
+  custom:
+    driver: bridge
