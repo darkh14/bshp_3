@@ -133,4 +133,3 @@ class ModelInfo(BaseModel):
 class ModelTypes(str, Enum):
     rf = 'rf'
     catboost = 'catboost'
-    catboostenc = 'catboostenc'

@@ -13,10 +13,11 @@ from pydantic import TypeAdapter, ValidationError
 
 from sklearn.base import BaseEstimator, TransformerMixin
 # import asyncio
-# import uuid 
+# import uuid
+import gc 
 
 from tasks import task_manager
-from settings import TEMP_FOLDER, USE_DETAILED_LOG
+from settings import TEMP_FOLDER, USE_DETAILED_LOG, DB_URL
 from api_types import DataRow
 from db import db_processor
 
@@ -103,17 +104,16 @@ class DataLoader:
         return pd.DataFrame([row])
 
 
-
 class Reader:
     
     async def read(self, data_filter):
         if USE_DETAILED_LOG:
             logger.info("Start reading data")
-        data = await db_processor.find("raw_data", convert_dates_in_db_filter(data_filter))
-        pd_data = pd.DataFrame(data) 
+        data = await db_processor.find("raw_data", convert_dates_in_db_filter(data_filter), batch_size=1000)
+        pd_data = pd.DataFrame(data)
+ 
         if USE_DETAILED_LOG:
             logger.info("Reading data. Done")        
-
         return pd_data
 
 

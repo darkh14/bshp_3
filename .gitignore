@@ -18,3 +18,5 @@
 /db/*
 __pycache__
 /bshp_ml/app/catboost_info
+bshp_ml/models
+models

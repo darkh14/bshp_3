@@ -29,7 +29,7 @@ class DBProcessor:
             logger.info("Try to connect attempt {}".format(att))            
             try:
                 self._connection = AsyncIOMotorClient(self.url, 
-                                                serverSelectionTimeoutMS=self.timeout)
+                                                serverSelectionTimeoutMS=self.timeout)              
                 
                 self.db = self._connection.get_database(self.master_db_name)            
                 await self.db.command("ping")
@@ -74,13 +74,20 @@ class DBProcessor:
 
         return result or None
 
-    async def find(self, collection_name: str, db_filter=None) -> list[dict]:
-
+    async def find(self, collection_name: str, db_filter=None, batch_size=0) -> list[dict]:
         collection = self._get_collection(collection_name)
 
         c_filter = db_filter if db_filter else None
-        result = await collection.find(c_filter, projection={'_id': False}).to_list()
-        result = list(result)
+        if batch_size:
+            cursor = collection.find(c_filter, projection={'_id': False}, batch_size=1000) # .to_list()
+            result = []
+
+            async for doc in cursor:
+                result.append(doc)
+
+            await cursor.close()
+        else:
+            result = await collection.find(c_filter, projection={'_id': False}).to_list()
 
         return result
 
