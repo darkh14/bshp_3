@@ -147,7 +147,10 @@ class Model(ABC):
         self.strict_acc = {}
         self.test_strict_acc = {}
         self.need_to_encode = True
-        self.classes = {}            
+        self.classes = {}  
+
+        self.metrics_dataset_name = ''
+        self.test_metrics_dataset_name = ''        
 
     async def fit(self, parameters):
         
@@ -155,32 +158,37 @@ class Model(ABC):
         try:
             need_to_initialize = self.status in [ModelStatuses.CREATED, ModelStatuses.ERROR] or parameters.get('refit') == 0
             calculate_metrics = True # parameters.get('calculate_metrics')
-            use_cross_validation = parameters.get('use_cross_validation')
+            use_cross_validation = True # parameters.get('use_cross_validation')
 
             await self._before_fit(parameters, need_to_initialize, calculate_metrics, use_cross_validation)         
             X_y = await self._read_dataset(parameters)
-            
-            metircs_dataset_name = ''
-            if calculate_metrics:
-                metircs_dataset_name = await self._save_dataset_to_temp(X_y)
 
+            train_test_indexes = None
+            self.metrics_dataset_name = ''
+            self.test_metrics_dataset_name = ''
             if use_cross_validation:
-                train_indexes, test_indexes = self._get_train_test_indexes(X_y)
+                train_test_indexes = self._get_train_test_indexes(X_y)
+                if calculate_metrics:
+                    self.metrics_dataset_name = await self._save_dataset_to_temp(X_y.iloc[train_test_indexes[0]])
+                    self.test_metrics_dataset_name = await self._save_dataset_to_temp(X_y.iloc[train_test_indexes[1]])  
+            else:
+                if calculate_metrics:
+                    self.metrics_dataset_name = await self._save_dataset_to_temp(X_y)                  
 
-            X_y = await self._transform_dataset(X_y, parameters, need_to_initialize)
+            datasets = await self._transform_dataset(X_y, parameters, need_to_initialize, train_test_indexes, calculate_metrics)
 
-            await self._fit(X_y, parameters, is_first=need_to_initialize, use_cross_validation=use_cross_validation)       
+            await self._fit(datasets['train'], parameters, is_first=need_to_initialize)       
                          
             if calculate_metrics:
-                await self._calculate_metrics(metircs_dataset_name, parameters, need_to_initialize, use_cross_validation)                   
+                await self._calculate_metrics(parameters, need_to_initialize, use_cross_validation)                   
 
-            await self._after_fit(parameters, need_to_initialize=need_to_initialize, metrics_dataset_name=metircs_dataset_name, use_cross_validation=use_cross_validation)
+            await self._after_fit(parameters, need_to_initialize=need_to_initialize, use_cross_validation=use_cross_validation)
 
         except Exception as e:
-            await self._on_fitting_error(e, metircs_dataset_name)
+            await self._on_fitting_error(e)
     
     @abstractmethod
-    async def _fit(self, datasets, parameters):
+    async def _fit(self, dataset, parameters, is_first=True):
         ...
 
     @abstractmethod
@@ -198,17 +206,38 @@ class Model(ABC):
 
         return train_indexes, test_indexes
 
-    def _get_train_test_datasets(self, X_y, train_indexes, test_indexes):
+    async def _get_train_test_datasets(self, X_y, train_indexes, test_indexes, calculate_metrics, use_cross_validation):
 
-        train_dataset = X_y.iloc[train_indexes].copy()
-        test_dataset = X_y.iloc[test_indexes].copy()
+        train_dataset = X_y.iloc[train_indexes]
+        test_dataset = X_y.iloc[test_indexes]
+
+        to_add = []
+        to_delete = []
+        for y_col in self.y_columns:
+            train_values = set(train_dataset[y_col].unique())
+            test_values = set(test_dataset[y_col].unique())
+
+            for val in train_values:
+                if val not in test_values:
+                    to_add.append(val)
+
+            for val in test_values:
+                if val not in train_values:
+                    to_delete.append(val)    
+
+            if to_delete:
+                test_dataset = test_dataset.loc[~test_dataset[y_col].isin(to_delete)]
+
+            if to_add:
+                add_dataset = train_dataset.loc[train_dataset[y_col].isin(to_add)]
+                test_dataset = pd.concat([test_dataset, add_dataset])
 
         return train_dataset, test_dataset    
 
     async def _get_metric(self, dataset):
 
         logger.info('Get metrics')       
-        metrics = float('inf')
+        metrics = -1
            
         c_x_columns = self.x_columns 
         dataset['check'] = 0
@@ -257,10 +286,14 @@ class Model(ABC):
             self.need_to_encode = parameters.get('need_to_encode', True)   
             self._delete_all_models()
         
-    async def _after_fit(self, parameters, need_to_initialize, use_cross_validation, metrics_dataset_name=''):
+    async def _after_fit(self, parameters, need_to_initialize, use_cross_validation):
         await self.save()
-        if metrics_dataset_name:
-            await self._delete_dataset_from_temp(metrics_dataset_name)
+        if self.metrics_dataset_name:
+            await self._delete_dataset_from_temp(self.metrics_dataset_name)
+            self.metrics_dataset_name = ''
+        if self.test_metrics_dataset_name:
+            await self._delete_dataset_from_temp(self.test_metrics_dataset_name)
+            self.test_metrics_dataset_name = ''
         self.status = ModelStatuses.READY
         self.fitting_end_date = datetime.now(UTC)   
         logger.info("Fitting. Done")   
@@ -275,7 +308,7 @@ class Model(ABC):
 
             return X_y
     
-    async def _transform_dataset(self, dataset, parameters, need_to_initialize):
+    async def _transform_dataset(self, dataset, parameters, need_to_initialize, train_test_indexes=None, calculate_metrics=False):
         if USE_DETAILED_LOG:
             logger.info("Transforming and checking data")
 
@@ -294,23 +327,39 @@ class Model(ABC):
         pipeline = Pipeline(pipeline_list)
         dataset = pipeline.fit_transform(dataset)
 
-        return dataset
+        datasets = {}
 
-    async def _on_fitting_error(self, ex, metrics_dataset_name=''):
+        if train_test_indexes:
+            datasets['train'] = dataset.iloc[train_test_indexes[0]]
+            datasets['test'] = dataset.iloc[train_test_indexes[1]]             
+        else:
+            datasets['train'] = dataset     
+
+        return datasets
+
+    async def _on_fitting_error(self, ex):
 
         self.status = ModelStatuses.ERROR
         self.error_text = str(ex) 
-        if metrics_dataset_name:
-            await self._delete_dataset_from_temp(metrics_dataset_name)     
+        if self.metrics_dataset_name:
+            await self._delete_dataset_from_temp(self.metrics_dataset_name)
+            self.metrics_dataset_name = ''
+        if self.test_metrics_dataset_name:
+            await self._delete_dataset_from_temp(self.test_metrics_dataset_name)
+            self.test_metrics_dataset_name = ''
+
         await self.save(without_models=True)
 
         raise ex
 
-    async def _calculate_metrics(self, dataset_name, parameters, need_to_initialize=False, use_cross_validation=False):
+    async def _calculate_metrics(self, parameters, need_to_initialize=False, use_cross_validation=False):
         if USE_DETAILED_LOG:
             logger.info("Start calculating metrics")
-        dataset = await self._load_dataset_from_temp(dataset_name)
+        dataset = await self._load_dataset_from_temp(self.metrics_dataset_name)
         self.metrics['train'] = await self._get_metric(dataset)
+        if use_cross_validation:
+            test_dataset = await self._load_dataset_from_temp(self.test_metrics_dataset_name)
+            self.metrics['test'] = await self._get_metric(test_dataset)            
 
         if USE_DETAILED_LOG:
             logger.info("Calculating metrics. Done")     
@@ -440,241 +489,17 @@ class Model(ABC):
         return dataset
     
     async def _delete_dataset_from_temp(self, collection_name):
-        await db_processor.delete_many(collection_name)
-
-
-class RfModel(Model):
-    model_type = ModelTypes.rf
-    def __init__(self, base_name):
-        super().__init__(base_name)
-
-    async def fit(self, parameters):
-        
-        try:
-
-            need_to_initialize = self.status in [ModelStatuses.CREATED, ModelStatuses.ERROR]
-            calculate_metrics = parameters.get('calculate_metrics')
-            use_cross_validation = parameters.get('use_cross_validation')
-
-            self.status = ModelStatuses.FITTING
-            self.fitting_start_date = datetime.now(UTC)
-
-            if need_to_initialize:
-                self.__init__(self.base_name)
-
-            data_filter = parameters['data_filter']
-            logger.info("Reading data from db")
-            X_y = await Reader().read(data_filter)
-
-            train_indexes, test_indexes = self._get_train_test_indexes(X_y)
-
-            logger.info("Transforming and checking data")
-            # pipeline = Pipeline([
-            #                     ('checker', Checker(self.parameters)),
-            #                     ('nan_processor', NanProcessor(self.parameters)),                            
-            #                     ('ferature_adder', FeatureAdder(self.parameters)),
-            #                     ('shuffler', Shuffler(self.parameters)),
-            #                     ])
-
-            pipeline = Pipeline([
-                                ('checker', Checker(self.parameters)),
-                                ('nan_processor', NanProcessor(self.parameters)),
-                                ('ferature_adder', FeatureAdder(self.parameters)),                            
-                                ('data_encoder', DataEncoder(self.parameters)),
-                                ('shuffler', Shuffler(self.parameters)),
-                                ])        
-
-            X_y = pipeline.fit_transform(X_y, [])
-
-            if use_cross_validation:
-                X_y_train, X_y_test = self._get_train_test_datasets(X_y, train_indexes, test_indexes)
-            else:
-                X_y_train, X_y_test = None, None
-
-            c_x_columns= self.x_columns
-
-            indexes_to_encode = []
-            for ind, col in enumerate(self.x_columns):
-                if col in self.columns_to_encode:
-                    indexes_to_encode.append(ind)
-            t_indexes_to_encode = indexes_to_encode.copy()
-            
-            for y_col in self.y_columns:
-                
-                logger.info('Start Fitting model. Field = "{}"'.format(y_col))
-
-                if y_col == 'cash_flow_details_code':
-                    self.field_models[y_col] = {}
-                    if use_cross_validation:
-                        self.test_field_models[y_col] = {}
-                    cash_flow_items = list(X_y['cash_flow_item_code'].unique())
-
-                    for ind, item_col in enumerate(cash_flow_items):
-                        logger.info("Fitting {} - {}".format(ind, item_col))
-
-                        c_X_y = X_y.loc[X_y['cash_flow_item_code'] == item_col].copy()
-                    
-                        if len(c_X_y[y_col].unique()) == 1:
-                            self.strict_acc[item_col] = c_X_y[y_col].unique()[0]
-                        else:
-                            X = c_X_y[self.x_columns].to_numpy()
-                            y = c_X_y[[y_col]].to_numpy().ravel()                             
-                            
-                            c_model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
-                            c_model.fit(X, y)
-                            self.field_models[y_col][item_col] = c_model
-
-                        if use_cross_validation:
-                            c_X_y_train = X_y_train.loc[X_y_train['cash_flow_item_code'] == item_col].copy()
-
-
-                            if len(c_X_y_train) == 0:
-                                self.test_strict_acc[item_col] = ''                                
-                            elif len(c_X_y_train[y_col].unique()) == 1:
-                                self.test_strict_acc[item_col] = c_X_y_train[y_col].unique()[0]
-                            else:
-                                X_train = c_X_y_train[self.x_columns].to_numpy()
-                                y_train = c_X_y_train[[y_col]].to_numpy().ravel()                             
-
-                                c_model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
-                                c_model.fit(X_train, y_train)
-                                self.test_field_models[y_col][item_col] = c_model
-
-                else:
-                    c_y_columns = [y_col]
-
-                    X, y = X_y[c_x_columns].to_numpy(), X_y[c_y_columns].to_numpy().ravel()
-                    if  use_cross_validation:
-                        X_train, y_train = X_y_train[c_x_columns].to_numpy(), X_y_train[c_y_columns].to_numpy().ravel()
-
-                    if need_to_initialize:
-                        model = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
-                        if use_cross_validation:
-                            model_test = RandomForestClassifier(n_estimators=200, max_depth=20, min_samples_leaf=1, min_samples_split=5)
-                    else:
-                        model = self.field_models[y_col]
-                        if use_cross_validation:
-                            model_test = self.test_field_models[y_col]
-
-                    model.fit(X, y)
-                    self.field_models[y_col] = model
-                    
-                    if use_cross_validation:
-                        model_test.fit(X_train, y_train)
-                        self.test_field_models[y_col] = model_test   
-
-                    logger.info('Fitting model. Field = "{}". Done'.format(y_col))            
-
-                indexes_to_encode.append(len(c_x_columns))
-                c_x_columns = c_x_columns + c_y_columns
-
-            self.data_encoder = pipeline.named_steps['data_encoder']
-
-            if calculate_metrics:
-                datasets = {'all': X_y}
-                
-                if use_cross_validation:
-                    datasets['train'] = X_y_train 
-                    datasets['test'] = X_y_test 
-
-                logger.info("Start calculating metrics")
-                self.metrics = await self._get_metrics(datasets) 
-                logger.info("Calculating metrics. Done")                     
-
-            self.status = ModelStatuses.READY
-            self.fitting_end_date = datetime.now(UTC)            
-        except Exception as e:
-            self.status = ModelStatuses.ERROR
-            self.error_text = str(e)
-
-            await self.write_to_db()
-            raise e
-
-    async def predict(self, X, for_metrics=False, use_test_models=False):
-        
-        if not for_metrics and self.status != ModelStatuses.READY:
-            raise ValueError('Model is not ready. Fit it before.')
-        
-        field_models = self.test_field_models if use_test_models else self.field_models
-
-        logger.info("Transforming and checking data")
-        X = pd.DataFrame(X)
-        X_result = X.copy()
-
-        if not for_metrics:
-            pipeline_list = [
-                            ('checker', Checker(self.parameters, for_predict=True)),
-                            ('nan_processor', NanProcessor(self.parameters, for_predict=True)),
-                            ('feature_addder', FeatureAdder(self.parameters, for_predict=True)),
-                            ('data_encoder',  self.data_encoder),                                                                                 
-                            ]        
-
-            pipeline = Pipeline(pipeline_list)
-
-            X_y = pipeline.transform(X).copy()
-        else:
-            X_y = X
-        c_x_columns= self.x_columns
-        
-        for y_col in self.y_columns:
-            logger.info('Start predicting. Field = "{}"'.format(y_col))
-            if y_col == 'cash_flow_details_code':
-
-                cash_flow_items = list(X_y['cash_flow_item_code'].unique())
-                X_y['row_number'] = X_y.index
-                X_y_list = []
-
-                for ind, item_col in enumerate(cash_flow_items):
-                    logger.info('Predicting {} - {}'.format(ind, item_col))
-                    c_X_y = X_y.loc[X_y['cash_flow_item_code'] == item_col].copy()
-                    
-                    if item_col not in field_models[y_col]:
-                        if item_col not in self.strict_acc:
-                            c_X_y[y_col] = ''
-                        else:
-                            c_X_y[y_col] = self.strict_acc[item_col]
-                    else:
-                        X = c_X_y[self.x_columns].to_numpy()
-
-                        c_model = field_models[y_col][item_col]
-                        y_pred = c_model.predict(X)
-                        c_X_y[y_col] = y_pred.ravel()
-
-                    X_y_list.append(c_X_y)
-
-                t_X_y = pd.concat(X_y_list, axis=0)
-                if y_col in X_y.columns:
-                    X_y = X_y.drop([y_col], axis=1)
-
-                X_y = X_y.merge(t_X_y[['row_number', y_col]], on=['row_number'], how='left')
-
-            else:
-                c_y_columns = [y_col]
-
-                X = X_y[c_x_columns].to_numpy()
-
-                model = field_models[y_col]
-                y = model.predict(X)
-
-                X_y[y_col] = y.ravel()
-
-                logger.info('Predicting model. Field = "{}". Done'.format(y_col))            
-
-            c_x_columns = c_x_columns + c_y_columns  
-
-        for col in self.y_columns:
-            X_result[col] = X_y[col]
-        
-        if for_metrics:
-            return X_result
-        else:
-            return X_result.to_dict(orient='records')                      
+        await db_processor.delete_many(collection_name)                
 
 
 class CbCallBack:
     def after_iteration(self, info):
         if USE_DETAILED_LOG:
-            logger.info("{}: - loss {}".format(info.iteration, info.metrics['learn'][list(info.metrics['learn'].keys())[0]][-1]))
+            if info.metrics.get('validation'):
+                logger.info("{}: - loss = {}, test loss = {}".format(info.iteration, info.metrics['learn'][list(info.metrics['learn'].keys())[0]][-1],
+                                                                     info.metrics['validation'][list(info.metrics['validation'].keys())[0]][-1]))
+            else:
+                logger.info("{}: - loss = {}".format(info.iteration, info.metrics['learn'][list(info.metrics['learn'].keys())[0]][-1]))
         return True  
 
 
@@ -683,10 +508,10 @@ class CatBoostModel(Model):
     def __init__(self, base_name):
         super().__init__(base_name)
 
-    async def _fit(self, pools, parameters, is_first, use_cross_validation):
+    async def _fit(self, dataset, parameters, is_first=True):
         if USE_DETAILED_LOG:
             logger.info('{} fit'.format('First' if is_first else 'continuous'))  
-
+        pools = dataset
         if is_first:
             self.strict_acc = {}
             self.test_strict_acc = {}
@@ -707,9 +532,11 @@ class CatBoostModel(Model):
                 pool = pools[y_col]
                 if isinstance(pool, list):
                     models = []
+                                        
                     for ind, c_pool in enumerate(pool):
                         if USE_DETAILED_LOG:
-                            logger.info("Model {}".format(ind))                         
+                            logger.info("Model {}".format(ind)) 
+                                                   
                         c_model = self._get_cb_model(parameters)
                         c_model.set_params(class_names=self.classes[y_col])
                         c_model.fit(c_pool, callbacks=[CbCallBack()], verbose=False)
@@ -734,7 +561,6 @@ class CatBoostModel(Model):
                     init_model = self.field_models[y_col] if is_first else None               
                     model = self._get_cb_model(parameters) 
                     model.fit(pool, callbacks=[CbCallBack()], verbose=False, init_model=init_model)
-                    # self.field_models[y_col] = model 
                     self._save_cb_model(c_model, y_col, number=ind)
                     del c_model
                     gc.collect()                    
@@ -917,8 +743,10 @@ class CatBoostModel(Model):
         
         return model
 
-    def _get_data_pools(self, dataset):
+    def _get_data_pools(self, dataset, test_dataset=None):
         pools= {}
+        test_pools = None
+        use_cross_validation = test_dataset is not None
         c_x_columns = self.x_columns.copy()
         to_delete = []
         cash_flow_items = list(dataset['cash_flow_item_code'].unique())
@@ -929,7 +757,7 @@ class CatBoostModel(Model):
                 if DATASET_BATCH_LENGTH > 0 and len(value_items) > 1:
                     begin = 0
                     end = DATASET_BATCH_LENGTH
-                    pools[y_col] = []
+                    pools[y_col] = []              
                     while True:
                         b_dataset = dataset.iloc[begin:min([end, len(dataset)])]
                         c_dataset = self._get_dataset_with_right_classes(b_dataset, c_x_columns, y_col, model_classes=value_items, all_dataset=dataset)
@@ -942,7 +770,7 @@ class CatBoostModel(Model):
                         if end >= len(dataset):
                             break
                         begin += DATASET_BATCH_LENGTH
-                        end += DATASET_BATCH_LENGTH                       
+                        end += DATASET_BATCH_LENGTH                      
                 else:
                     c_dataset = self._get_dataset_with_right_classes(dataset, c_x_columns, y_col)
                     if c_dataset is not None:
@@ -964,7 +792,7 @@ class CatBoostModel(Model):
                         pools[y_col][item_col].quantize()                        
                         to_delete.append(c_dataset)                        
                     else:
-                        pools[y_col][item_col] = value               
+                        pools[y_col][item_col] = value
 
             c_x_columns.append(y_col)
 
@@ -976,7 +804,7 @@ class CatBoostModel(Model):
 
         gc.collect()
 
-        return pools
+        return pools, test_pools
 
     def _save_cb_model(self, model: CatBoostClassifier, column, item=None, number=None):
         path_to_model_folder = os.path.join(MODEL_FOLDER, self.uid, column)
@@ -1052,23 +880,29 @@ class CatBoostModel(Model):
 
             os.remove(os.path.join(path_to_dir, filename))
 
-    async def _transform_dataset(self, dataset, parameters, need_to_initialize):
-        X_y = await super()._transform_dataset(dataset, parameters, need_to_initialize)
-        
+    async def _transform_dataset(self, dataset, parameters, need_to_initialize, train_test_indexes=None, calculate_metrics=False):
+        datasets = await super()._transform_dataset(dataset, parameters, need_to_initialize, train_test_indexes, calculate_metrics)
+        pools = {}
         self.classes = {}
         if need_to_initialize:
             for y_col in self.y_columns:
-                self.classes[y_col] = list(X_y[y_col].unique())
-        pools = self._get_data_pools(X_y)
-        del X_y
-        X_y = pd.DataFrame()            
+                self.classes[y_col] = list(datasets['train'][y_col].unique())
+        train_pools, test_pools = self._get_data_pools(datasets['train'], datasets.get('test'))
+        del datasets['train']
+        datasets['train'] = pd.DataFrame()           
+        pools['train'] = train_pools
+
+        if datasets.get('test') is not None:           
+            del datasets['test']
+            datasets['test'] = pd.DataFrame()            
+
         gc.collect()
 
         return pools
 
-    async def _on_fitting_error(self, ex, metrics_dataset_name=''):
+    async def _on_fitting_error(self, ex):
         self._delete_all_models()            
-        await super()._on_fitting_error(ex, metrics_dataset_name)
+        await super()._on_fitting_error(ex)
 
     def _save_column_model(self, column, item=None):
 

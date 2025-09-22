@@ -195,17 +195,13 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         if value == -1:
             return ''
         else:
-            try:
-                return self.decode_dict[field][value]
-            except Exception as e:
-                print('------------', field, value)
-                raise e
+            return self.decode_dict[field].get(value, -1)
     
     def _get_encoded_field(self, value, field):
         if not value:
             return -1
         else:
-            return self.encode_dict[field][value]
+            return self.encode_dict[field].get(value, -1)
 
 
 class FeatureAdder(BaseEstimator, TransformerMixin):
