@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 import os
 
-VERSION = '3.2.2.1'
+VERSION = '3.2.4.0'
 BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class Settings(BaseSettings):
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     USED_RAM_LIMIT: float = 2e9
     USE_DETAILED_LOG: bool = True
     DATASET_BATCH_LENGTH: int = 0
+    QUANTIZE: bool = False
     class Config:
         env_file = "../../.env"
         extra = 'allow'

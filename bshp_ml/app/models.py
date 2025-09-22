@@ -4,7 +4,6 @@ from typing import Optional
 from enum import Enum
 import pickle
 from datetime import datetime, UTC
-import zlib
 import os
 import uuid
 import pandas as pd
@@ -23,7 +22,7 @@ from catboost import CatBoostClassifier, Pool, sum_models, to_classifier
 from data_processing import Reader, Checker, DataEncoder, NanProcessor, Shuffler, FeatureAdder, data_loader
 from db import db_processor
 from api_types import ModelStatuses, ModelTypes
-from settings import MODEL_FOLDER, THREAD_COUNT, USE_DETAILED_LOG, USED_RAM_LIMIT, DATASET_BATCH_LENGTH
+from settings import MODEL_FOLDER, THREAD_COUNT, USE_DETAILED_LOG, USED_RAM_LIMIT, DATASET_BATCH_LENGTH, QUANTIZE
 
 logging.getLogger("bshp_data_processing_logger").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -155,34 +154,37 @@ class Model(ABC):
         logger.info("Fitting")             
         try:
             need_to_initialize = self.status in [ModelStatuses.CREATED, ModelStatuses.ERROR] or parameters.get('refit') == 0
-            calculate_metrics = parameters.get('calculate_metrics')
+            calculate_metrics = True # parameters.get('calculate_metrics')
             use_cross_validation = parameters.get('use_cross_validation')
-
-            self.status = ModelStatuses.FITTING
-            self.fitting_start_date = datetime.now(UTC)
 
             await self._before_fit(parameters, need_to_initialize, calculate_metrics, use_cross_validation)         
             X_y = await self._read_dataset(parameters)
-            train_indexes, test_indexes = self._get_train_test_indexes(X_y)
+            
+            metircs_dataset_name = ''
+            if calculate_metrics:
+                metircs_dataset_name = await self._save_dataset_to_temp(X_y)
+
+            if use_cross_validation:
+                train_indexes, test_indexes = self._get_train_test_indexes(X_y)
 
             X_y = await self._transform_dataset(X_y, parameters, need_to_initialize)
 
             await self._fit(X_y, parameters, is_first=need_to_initialize, use_cross_validation=use_cross_validation)       
                          
             if calculate_metrics:
-                await self._calculate_metrics(parameters, need_to_initialize, use_cross_validation)                   
+                await self._calculate_metrics(metircs_dataset_name, parameters, need_to_initialize, use_cross_validation)                   
 
-            await self._after_fit(parameters, need_to_initialize=need_to_initialize, calculate_metrics=calculate_metrics, use_cross_validation=use_cross_validation)
+            await self._after_fit(parameters, need_to_initialize=need_to_initialize, metrics_dataset_name=metircs_dataset_name, use_cross_validation=use_cross_validation)
 
         except Exception as e:
-            await self._on_fitting_error(e)
+            await self._on_fitting_error(e, metircs_dataset_name)
     
     @abstractmethod
     async def _fit(self, datasets, parameters):
         ...
 
     @abstractmethod
-    async def predict(self, x):
+    async def predict(self,  X, for_metrics=False):
         ...
 
     def _get_train_test_indexes(self, X_y):
@@ -203,33 +205,32 @@ class Model(ABC):
 
         return train_dataset, test_dataset    
 
-    async def _get_metrics(self, datasets):
-        # predictions to calculate metrics
+    async def _get_metric(self, dataset):
+
         logger.info('Get metrics')       
-        metrics = {}
+        metrics = float('inf')
            
-        for name, dataset in datasets.items():
-            c_x_columns = self.x_columns 
-            dataset['check'] = 0
+        c_x_columns = self.x_columns 
+        dataset['check'] = 0
 
-            to_rename = {el: '{}_val'.format(el) for el in self.y_columns}
-            dataset = dataset.rename(to_rename, axis=1)
-            use_test_models = name in ['test', 'train']
-            dataset_pred = await self.predict(dataset, for_metrics=True, use_test_models=use_test_models)
+        to_rename = {el: '{}_val'.format(el) for el in self.y_columns}
+        dataset = dataset.rename(to_rename, axis=1)
 
-            for y_col in self.y_columns:
+        dataset_pred = await self.predict(dataset, for_metrics=True)
 
-                check_column = '{}_check'.format(y_col)
-                pred_column = '{}_pred'.format(y_col)
-                val_column = '{}_val'.format(y_col)
+        for y_col in self.y_columns:
 
-                dataset[pred_column] = dataset_pred[y_col]
-                logger.info('Calculating metrics dataset "{}", field "{}"'.format(name, y_col)) 
+            check_column = '{}_check'.format(y_col)
+            pred_column = '{}_pred'.format(y_col)
+            val_column = '{}_val'.format(y_col)
 
-                dataset[check_column] = dataset[val_column] != dataset[pred_column] 
+            dataset[pred_column] = dataset_pred[y_col]
+            logger.info('Calculating metrics , field "{}"'.format(y_col)) 
 
-                dataset['check'] = dataset['check'] + dataset[check_column]
-                logger.info('Done')
+            dataset[check_column] = dataset[val_column] != dataset[pred_column] 
+
+            dataset['check'] = dataset['check'] + dataset[check_column]
+            logger.info('Done')
 
             dataset['check'] = dataset['check'] == 0
             dataset['check'] = dataset['check'].astype(int)
@@ -242,18 +243,24 @@ class Model(ABC):
 
             all = dataset_grouped['check_all'].shape[0]
             right = dataset_grouped[dataset_grouped['check_all']==1].shape[0]
-            metrics['acuracy_{}'.format(name)] = right/all
+            metrics = right/all
 
         return metrics
 
     async def _before_fit(self, parameters, need_to_initialize, calculate_metrics, use_cross_validation):
+
+        self.status = ModelStatuses.FITTING
+        self.fitting_start_date = datetime.now(UTC)  
+
         if need_to_initialize:
             self.__init__(self.base_name)
             self.need_to_encode = parameters.get('need_to_encode', True)   
             self._delete_all_models()
         
-    async def _after_fit(self, parameters, need_to_initialize, calculate_metrics, use_cross_validation):
+    async def _after_fit(self, parameters, need_to_initialize, use_cross_validation, metrics_dataset_name=''):
         await self.save()
+        if metrics_dataset_name:
+            await self._delete_dataset_from_temp(metrics_dataset_name)
         self.status = ModelStatuses.READY
         self.fitting_end_date = datetime.now(UTC)   
         logger.info("Fitting. Done")   
@@ -277,8 +284,11 @@ class Model(ABC):
         pipeline_list.append(('nan_processor', NanProcessor(self.parameters)))        
         pipeline_list.append(('feature_adder', FeatureAdder(self.parameters)))  
         if self.need_to_encode:
-            self.data_encoder = DataEncoder(self.parameters)   
-            pipeline_list.append(('data_encoder', self.data_encoder))                              
+            if need_to_initialize:
+                self.data_encoder = DataEncoder(self.parameters)  
+            self.data_encoder.form_encode_dict = need_to_initialize 
+            pipeline_list.append(('data_encoder', self.data_encoder)) 
+
         pipeline_list.append(('shuffler', Shuffler(self.parameters)))                 
 
         pipeline = Pipeline(pipeline_list)
@@ -286,27 +296,25 @@ class Model(ABC):
 
         return dataset
 
-    async def _on_fitting_error(self, ex):
+    async def _on_fitting_error(self, ex, metrics_dataset_name=''):
 
         self.status = ModelStatuses.ERROR
-        self.error_text = str(ex)          
+        self.error_text = str(ex) 
+        if metrics_dataset_name:
+            await self._delete_dataset_from_temp(metrics_dataset_name)     
         await self.save(without_models=True)
 
         raise ex
 
-    async def _calculate_metrics(self, parameters, need_to_initialize, use_cross_validation):
-        pass
-        #     datasets = {'all': X_y}
-            
-        #     if use_cross_validation:
-        #         datasets['train'] = X_y_train 
-        #         datasets['test'] = X_y_test 
-        #     if USE_DETAILED_LOG:
-        #         logger.info("Start calculating metrics")
-        #     self.metrics = await self._get_metrics(datasets) 
-        #     if USE_DETAILED_LOG:
-        #         logger.info("Calculating metrics. Done")     
-        
+    async def _calculate_metrics(self, dataset_name, parameters, need_to_initialize=False, use_cross_validation=False):
+        if USE_DETAILED_LOG:
+            logger.info("Start calculating metrics")
+        dataset = await self._load_dataset_from_temp(dataset_name)
+        self.metrics['train'] = await self._get_metric(dataset)
+
+        if USE_DETAILED_LOG:
+            logger.info("Calculating metrics. Done")     
+
     @abstractmethod
     def _save_column_model(self, column, item=None):
         ...
@@ -369,9 +377,9 @@ class Model(ABC):
     def _load_encoder(self):
         if self.need_to_encode:
             path_to_model = os.path.join(MODEL_FOLDER, self.uid)
-
-            with open(os.path.join(path_to_model, 'encoder.pkl'), 'rb') as fp:
-                self.data_encoder = pickle.load(fp)
+            if os.path.exists(path_to_model):
+                with open(os.path.join(path_to_model, 'encoder.pkl'), 'rb') as fp:
+                    self.data_encoder = pickle.load(fp)
 
     def _delete_all_models(self):
         path_to_dir = os.path.join(MODEL_FOLDER, self.uid)
@@ -388,16 +396,17 @@ class Model(ABC):
         self.uid = uid
 
         self._load_parameters()
+        
+        if self.status != ModelStatuses.ERROR:
+            for y_col in self.y_columns:
 
-        for y_col in self.y_columns:
+                if y_col == 'cash_flow_details_code':
+                    for item in self.classes[y_col]:
+                        self._load_column_model(y_col, item)
+                else:
+                    self._load_column_model(y_col)
 
-            if y_col == 'cash_flow_details_code':
-                for item in self.classes[y_col]:
-                    self._load_column_model(y_col, item)
-            else:
-                self._load_column_model(y_col)
-
-        self._load_encoder()
+            self._load_encoder()
 
     async def save(self, without_models=False):
         if not os.path.isdir(MODEL_FOLDER):
@@ -419,6 +428,19 @@ class Model(ABC):
                     self._save_column_model(y_col)
             self._save_encoder()
         self._save_parameters()
+
+    async def _save_dataset_to_temp(self, dataset):
+        collection_name = 'temp_{}'.format(uuid.uuid4())
+        await db_processor.insert_many(collection_name, dataset.to_dict(orient='records'))
+        return collection_name
+
+    async def _load_dataset_from_temp(self, collection_name):
+        dataset = await db_processor.find(collection_name)
+        dataset = pd.DataFrame(dataset)
+        return dataset
+    
+    async def _delete_dataset_from_temp(self, collection_name):
+        await db_processor.delete_many(collection_name)
 
 
 class RfModel(Model):
@@ -695,7 +717,9 @@ class CatBoostModel(Model):
                         del c_model
                         gc.collect()
 
-                    models = self._load_column_models(y_col).values()                    
+                    models = self._load_column_models(y_col).values() 
+                    if not is_first:
+                        models = [self.field_models[y_col]] + models                   
                     model = to_classifier(sum_models(models)) if len(models) > 1 else models[0]
                     self.field_models[y_col] = model 
                     self._save_cb_model(model, y_col)
@@ -706,9 +730,10 @@ class CatBoostModel(Model):
 
                     self._delete_submodels(y_col)
 
-                elif isinstance(pool, Pool):               
+                elif isinstance(pool, Pool):
+                    init_model = self.field_models[y_col] if is_first else None               
                     model = self._get_cb_model(parameters) 
-                    model.fit(pool, callbacks=[CbCallBack()], verbose=False)
+                    model.fit(pool, callbacks=[CbCallBack()], verbose=False, init_model=init_model)
                     # self.field_models[y_col] = model 
                     self._save_cb_model(c_model, y_col, number=ind)
                     del c_model
@@ -726,9 +751,10 @@ class CatBoostModel(Model):
                     if USE_DETAILED_LOG:
                         logger.info("Fitting {} - {}".format(ind, item_col))                    
                     if isinstance(c_pool, Pool):
+                        init_model = self.field_models[y_col][item_col] if not is_first else None
                         c_model = self._get_cb_model(parameters)
   
-                        c_model.fit(c_pool, callbacks=[CbCallBack()], verbose=False)
+                        c_model.fit(c_pool, callbacks=[CbCallBack()], verbose=False, init_model=init_model)
 
                         self._save_cb_model(c_model, column=y_col, item=item_col)
                         del c_model
@@ -742,31 +768,32 @@ class CatBoostModel(Model):
 
             self._load_all_models()
 
-    async def predict(self, X, for_metrics=False, use_test_models=False):
+    async def predict(self, X, for_metrics=False):
         
         if not for_metrics and self.status != ModelStatuses.READY:
             raise ValueError('Model is not ready. Fit it before.')
         
-        field_models = self.test_field_models if use_test_models else self.field_models
+        field_models = self.field_models
         if USE_DETAILED_LOG:
             logger.info("Transforming and checking data")
         X = pd.DataFrame(X)
         row_numbers = list(X.index)
         X_result = X.copy()
 
-        if not for_metrics:
-            pipeline_list = []
-            pipeline_list.append(('checker', Checker(self.parameters, for_predict=True)))
-            pipeline_list.append(('nan_processor', NanProcessor(self.parameters, for_predict=True)))  
-            pipeline_list.append(('feature_addder', FeatureAdder(self.parameters, for_predict=True)))  
-            if self.need_to_encode:
-                pipeline_list.append(('data_encoder', self.data_encoder))                     
+        pipeline_list = []
+        pipeline_list.append(('checker', Checker(self.parameters, for_predict=True)))
+        pipeline_list.append(('nan_processor', NanProcessor(self.parameters, for_predict=True)))  
+        pipeline_list.append(('feature_addder', FeatureAdder(self.parameters, for_predict=True)))  
+        if self.need_to_encode:
+            pipeline_list.append(('data_encoder', self.data_encoder))                     
 
-            pipeline = Pipeline(pipeline_list)
+        pipeline = Pipeline(pipeline_list)
 
-            X_y = pipeline.transform(X).copy()
-        else:
-            X_y = X.copy()
+        for y_col in self.y_columns:
+            X[y_col] = ''
+
+        X_y = pipeline.transform(X).copy()
+
         c_x_columns= self.x_columns
         
         for y_col in self.y_columns:
@@ -781,6 +808,7 @@ class CatBoostModel(Model):
                 for ind, item_col in enumerate(cash_flow_items):
                     if USE_DETAILED_LOG:                    
                         logger.info('Predicting {} - {}'.format(ind, item_col))
+
                     c_X_y = X_y.loc[X_y['cash_flow_item_code'] == item_col].copy()
                     
                     if (self.strict_acc.get(y_col) is not None 
@@ -790,11 +818,11 @@ class CatBoostModel(Model):
                     
                         X = c_X_y[self.x_columns].to_numpy()
 
-                        c_model = field_models[y_col][item_col]
+                        c_model = field_models[y_col][str(item_col)]
                         y_pred = c_model.predict(X)
                         c_X_y[y_col] = y_pred.ravel()
 
-                        X_y_list.append(c_X_y)
+                    X_y_list.append(c_X_y)
 
                 t_X_y = pd.concat(X_y_list, axis=0)
                 if y_col in X_y.columns:
@@ -817,7 +845,7 @@ class CatBoostModel(Model):
 
             c_x_columns = c_x_columns + c_y_columns  
 
-        if not for_metrics and self.need_to_encode:
+        if self.need_to_encode:
             X_y = pipeline.named_steps['data_encoder'].inverse_transform(X_y)  
 
         for col in self.y_columns:
@@ -906,7 +934,8 @@ class CatBoostModel(Model):
                         b_dataset = dataset.iloc[begin:min([end, len(dataset)])]
                         c_dataset = self._get_dataset_with_right_classes(b_dataset, c_x_columns, y_col, model_classes=value_items, all_dataset=dataset)
                         c_pool = Pool(c_dataset[c_x_columns], c_dataset[y_col])
-                        c_pool.quantize()
+                        if QUANTIZE:
+                            c_pool.quantize()
                         pools[y_col].append(c_pool)
                         to_delete.append(c_dataset) 
                         to_delete.append(b_dataset)                       
@@ -918,7 +947,8 @@ class CatBoostModel(Model):
                     c_dataset = self._get_dataset_with_right_classes(dataset, c_x_columns, y_col)
                     if c_dataset is not None:
                         pools[y_col] = Pool(c_dataset[c_x_columns], c_dataset[y_col])
-                        pools[y_col].quantize()
+                        if QUANTIZE:
+                            pools[y_col].quantize()
                         to_delete.append(c_dataset)                     
                     else:
                         pools[y_col] = dataset.iloc[0][y_col]
@@ -978,7 +1008,7 @@ class CatBoostModel(Model):
         if item is not None:
             if not self.field_models.get(column):
                 self.field_models[column] = {}
-            self.field_models[column][item] = model
+            self.field_models[column][str(item)] = model
         else:
             self.field_models[column] = model
 
@@ -1036,9 +1066,9 @@ class CatBoostModel(Model):
 
         return pools
 
-    async def _on_fitting_error(self, ex):
+    async def _on_fitting_error(self, ex, metrics_dataset_name=''):
         self._delete_all_models()            
-        await super()._on_fitting_error(ex)
+        await super()._on_fitting_error(ex, metrics_dataset_name)
 
     def _save_column_model(self, column, item=None):
 
@@ -1075,7 +1105,7 @@ class CatBoostModel(Model):
                     self.strict_acc[column] = np.int64(json.load(fp)['value'])
             elif os.path.exists(os.path.join(MODEL_FOLDER, self.uid, column, 'sum.cbm')):
                 self._load_cb_model(column) 
-
+  
 
 class ModelManager:
 

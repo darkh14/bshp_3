@@ -78,6 +78,7 @@ async def lifespan(app: FastAPI):
         app.db = db_processor
         logger.info(DB_URL)        
         await app.db.connect(url=DB_URL)
+        await app.db.delete_temp_collections()
         logger.info("DB connection done")
 
     except Exception as e:

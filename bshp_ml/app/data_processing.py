@@ -145,6 +145,7 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         self.y_columns = self.parameters['y_columns']
         self.additional_columns = self.parameters['additional_columns']
         self.columns_to_encode = self.parameters['columns_to_encode']
+        self.form_encode_dict=False
 
         self.encode_dict = {}
         self.decode_dict = {}
@@ -153,14 +154,14 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         if USE_DETAILED_LOG:
             logger.info("Start encoding data")
             logger.info("Form encode dict")
-        
-        for col in self.columns_to_encode:
-            uniq = list(X[col].unique())
+        if self.form_encode_dict:
+            for col in self.columns_to_encode:
+                uniq = list(X[col].unique())
 
-            uniq = [el for el in uniq if el]
-            
-            enc_dict = dict(zip(uniq, range(len(uniq))))
-            self.encode_dict[col] = enc_dict
+                uniq = [el for el in uniq if el]
+                
+                enc_dict = dict(zip(uniq, range(len(uniq))))
+                self.encode_dict[col] = enc_dict
 
         return self
     
@@ -179,9 +180,10 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         if USE_DETAILED_LOG:        
             logger.info("Start decoding data")        
         self.decode_dict = {}
-        for col in self.encode_dict:
-            d = {v: k for k, v in self.encode_dict[col].items()}
-            self.decode_dict[col] = d
+        if self.form_encode_dict:
+            for col in self.encode_dict:
+                d = {v: k for k, v in self.encode_dict[col].items()}
+                self.decode_dict[col] = d
 
         for col in self.columns_to_encode:
             X[col] = X[col].apply(lambda x: self._get_decoded_field(x, col))
@@ -193,7 +195,11 @@ class DataEncoder(BaseEstimator, TransformerMixin):
         if value == -1:
             return ''
         else:
-            return self.decode_dict[field][value]
+            try:
+                return self.decode_dict[field][value]
+            except Exception as e:
+                print('------------', field, value)
+                raise e
     
     def _get_encoded_field(self, value, field):
         if not value:

@@ -157,5 +157,14 @@ class DBProcessor:
 
         return True
 
+    async def get_collection_names(self):
+        return await self.db.list_collection_names()
+
+    async def delete_temp_collections(self):
+        collection_names = await self.get_collection_names()
+        for collection_name in collection_names:
+            if 'temp_' in collection_name:
+                await self.delete_many(collection_name)
+
 
 db_processor = DBProcessor()
