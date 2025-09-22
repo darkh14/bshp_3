@@ -480,7 +480,7 @@ class Model(ABC):
 
     async def _save_dataset_to_temp(self, dataset):
         collection_name = 'temp_{}'.format(uuid.uuid4())
-        await db_processor.insert_many(collection_name, dataset.to_dict(orient='records'))
+        await db_processor.insert_many(collection_name, dataset[self.x_columns + self.y_columns].to_dict(orient='records'))
         return collection_name
 
     async def _load_dataset_from_temp(self, collection_name):
