@@ -157,8 +157,8 @@ class Model(ABC):
         logger.info("Fitting")             
         try:
             need_to_initialize = self.status in [ModelStatuses.CREATED, ModelStatuses.ERROR] or parameters.get('refit') == 0
-            calculate_metrics = True # parameters.get('calculate_metrics')
-            use_cross_validation = True # parameters.get('use_cross_validation')
+            calculate_metrics = parameters.get('calculate_metrics')
+            use_cross_validation = parameters.get('use_cross_validation')
 
             await self._before_fit(parameters, need_to_initialize, calculate_metrics, use_cross_validation)         
             X_y = await self._read_dataset(parameters)
@@ -558,10 +558,10 @@ class CatBoostModel(Model):
                     self._delete_submodels(y_col)
 
                 elif isinstance(pool, Pool):
-                    init_model = self.field_models[y_col] if is_first else None               
-                    model = self._get_cb_model(parameters) 
-                    model.fit(pool, callbacks=[CbCallBack()], verbose=False, init_model=init_model)
-                    self._save_cb_model(c_model, y_col, number=ind)
+                    init_model = self.field_models[y_col] if not is_first else None               
+                    c_model = self._get_cb_model(parameters) 
+                    c_model.fit(pool, callbacks=[CbCallBack()], verbose=False, init_model=init_model)
+                    self._save_cb_model(c_model, y_col)
                     del c_model
                     gc.collect()                    
                 else:
