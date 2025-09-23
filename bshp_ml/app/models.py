@@ -14,6 +14,7 @@ import gc
 import shutil
 from copy import deepcopy
 import json
+import random
 
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
@@ -203,7 +204,8 @@ class Model(ABC):
 
     def _get_train_test_indexes(self, X_y):
         indexes_len = X_y.shape[0]
-        indexes = np.arange(indexes_len)
+        indexes = list(np.arange(indexes_len))
+        random.shuffle(indexes)
 
         test_size=0.2
 
