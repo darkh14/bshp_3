@@ -9,7 +9,8 @@ services:
       - DB_PORT=27017
       - TEST_MODE=true
       - DB_URL=mongodb://db:27017
-      - DATASET_BATCH_LENGTH=200000           
+      - DATASET_BATCH_LENGTH=200000
+      - QUANTIZE=true           
     build:
         context: ./bshp_ml
         dockerfile: Dockerfile      

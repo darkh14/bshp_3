@@ -97,7 +97,13 @@ class Model(ABC):
         self.bool_columns = ['is_reverse', 'is_main_asset']
         self.float_columns = ['qty',
                               'price',
-                              'sum',]        
+                              'sum',]     
+
+        self.date_columns = ['date',
+                             'base_document_date',
+                             'article_document_date',
+                             'uploading_date']
+                     
         self.parameters = {'x_columns': self.x_columns, 
                            'y_columns': self.y_columns, 
                            'str_columns': self.str_columns,
@@ -480,14 +486,28 @@ class Model(ABC):
 
     async def _save_dataset_to_temp(self, dataset):
         collection_name = 'temp_{}'.format(uuid.uuid4())
-        columns = self.x_columns + self.y_columns
-        columns = [el for el in columns if el not in ['document_month', 'document_year']]
-        await db_processor.insert_many(collection_name, dataset[columns].to_dict(orient='records'))
+        def date_to_str(value):
+            try:
+                return datetime.strftime(value, r'%d.%m.%Y %H:%M:%S')
+            except:
+                return '01.01.1970 00:00:00'
+
+        for col in self.date_columns:
+            dataset[col] = dataset[col].apply(date_to_str)
+
+        await db_processor.insert_many(collection_name, dataset.to_dict(orient='records'))
         return collection_name
 
     async def _load_dataset_from_temp(self, collection_name):
         dataset = await db_processor.find(collection_name)
         dataset = pd.DataFrame(dataset)
+        def str_to_date(value):
+            try:
+                return datetime.strptime(value, r'%d.%m.%Y %H:%M:%S')
+            except:
+                return datetime(1970, 1, 1, 0, 0, 0)        
+        for col in self.date_columns:
+            dataset[col] = dataset[col].apply(str_to_date)        
         return dataset
     
     async def _delete_dataset_from_temp(self, collection_name):
